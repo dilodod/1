@@ -1,109 +1,36 @@
--- LightVulnerability - Integrated Combat GUI
+-- LightV2 - Full Combat Integration
 -- LocalScript в StarterPlayerScripts
 
 local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local Workspace = game:GetService("Workspace")
 local UIS = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
 local HttpService = game:GetService("HttpService")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
 
-local localPlayer = Players.LocalPlayer
+local player = Players.LocalPlayer
 local camera = Workspace.CurrentCamera
 
--- === РАСШИРЕННЫЙ КОНФИГ ===
+-- === КОНФИГ (твой стиль) ===
 local Config = {
-    -- Main
-    Enabled = true,
-    
-    -- Aim
-    Aim = true,
-    AimSpeed = 0.02,
-    AimFastSpeed = 0.008,
-    AimFastOnDebris = true,
-    AimY = false, -- Вкл/выкл поворот по вертикали
-    AimSmoothing = true,
-    
-    -- Target
-    TargetMode = "Nearest", -- Nearest, LowestHP, Manual
-    TargetMaxDistance = 9,
-    Whitelist = {}, -- UserId = true (игнорировать)
-    Targets = {}, -- UserId = true (приоритет)
-    AutoTarget = true, -- Автоматически выбирать цель
-    
-    -- Attack
-    Attack = true,
-    ClickDuration = 0.05, -- Мгновенный клик (0.05 = минимум)
-    AttackOnStun = true, -- Клик при combostun
-    AttackOnFreeze = true, -- Клик при freeze
-    AttackOnDebris = true, -- Клик при Small Debris
-    AttackDelay = 0.06, -- Минимальный delay между кликами
-    AutoCrit = true, -- Авто-криты (по таймингу)
-    BlackFlash = false, -- Авто BF после блока
-    BFChance = 30, -- Шанс BF
-    AttackAfterBlock = true, -- Клик после отпускания блока
-    
-    -- Block
-    Block = true,
-    BlockM1 = true, -- Блокировать M1 врага
-    BlockDebris = true, -- Блокировать Small Debris
-    BlockCounter = true, -- Блокировать Projectile/Atomic Counter
-    Anticounter = false, -- Специальная защита от counter
-    
-    -- ESP
-    ESP = true,
-    ESPWhitelist = true, -- Белые рамки для вайтлиста
-    ESPTargets = true, -- Синие рамки для таргетов
-    ESPCounters = true, -- Красные рамки для counter-ов (НОВОЕ)
-    ESPNames = true, -- Имена над головой
-    ESPDistance = true, -- Дистанция
-    ESPShowAll = false, -- Показывать всех (false = только важных)
-    ESPMaxDistance = 100,
+    Aim = false, AimSpeed = 0.02, AimFastSpeed = 0.008, AimFastOnDebris = true, AimY = false,
+    TargetMode = "Nearest", TargetMaxDistance = 9,
+    Whitelist = {},
+    Targets = {},
+    ESP = false,
+    ESPWhitelist = true,
+    ESPTargets = true,
+    ESPNames = true,
+    ESPShowAll = false,
+    Attack = false, ClickDuration = 0.05, 
+    AttackOnStun = true, AttackOnFreeze = true, AttackDelay = 0.06, 
+    AutoCrit = true, BlackFlash = false, BFChance = 30,
+    Anticounter = false,
+    Block = false, BlockM1 = true, BlockDebris = true, BlockCounter = true,
+    CurrentConfig = "Default",
 }
 
--- === ОПИСАНИЯ ДЛЯ GUI ===
-local Descriptions = {
-    Enabled = "Включить/выключить весь скрипт",
-    
-    Aim = "Авто-поворот к цели",
-    AimSpeed = "Скорость поворота (0.001-0.1)",
-    AimFastSpeed = "Ускоренная скорость при Debris",
-    AimFastOnDebris = "Ускорять поворот когда враг в Debris",
-    AimY = "Поворот вверх/вниз (Y axis)",
-    AimSmoothing = "Плавный поворот (иначе мгновенный)",
-    
-    TargetMode = "Режим выбора цели",
-    TargetMaxDistance = "Максимальная дистанция для цели",
-    AutoTarget = "Автоматически выбирать ближайшую цель",
-    
-    Attack = "Авто-кликер",
-    ClickDuration = "Длительность клика (0.05 = мгновенно)",
-    AttackOnStun = "Атаковать когда враг в ComboStun",
-    AttackOnFreeze = "Атаковать когда враг Frozen",
-    AttackOnDebris = "Атаковать когда враг в Small Debris",
-    AttackDelay = "Задержка между атаками (сек)",
-    AutoCrit = "Автоматические криты",
-    BlackFlash = "Авто Black Flash после блока",
-    BFChance = "Шанс срабатывания BF (%)",
-    AttackAfterBlock = "Кликать сразу после отпускания блока",
-    
-    Block = "Авто-блок",
-    BlockM1 = "Блокировать атаки врага (M1)",
-    BlockDebris = "Блокировать Small Debris",
-    BlockCounter = "Блокировать Projectile/Atomic Counter",
-    Anticounter = "Защита от counter-атак",
-    
-    ESP = "Видеть игроков через стены",
-    ESPWhitelist = "Белые рамки для игнорируемых",
-    ESPTargets = "Синие рамки для приоритетных целей",
-    ESPCounters = "Красные рамки для игроков с Counter",
-    ESPNames = "Показывать имена",
-    ESPDistance = "Показывать дистанцию",
-    ESPShowAll = "Показывать всех игроков",
-    ESPMaxDistance = "Макс дистанция для ESP",
-}
-
--- === КОНСТАНТЫ КОМБАТА ===
+-- === КОНСТАНТЫ КОМБАТА (из второго скрипта) ===
 local COMBAT = {
     CHECK_RADIUS = 9,
     ATTACK_RANGE = 9,
@@ -116,7 +43,6 @@ local COMBAT = {
     ATTACK_WINDOW = 0.5,
     PROTECTION_WINDOW = 0.3,
     TICK_RATE = 0.008,
-    FAST_ROTATION_SPEED = 0.02,
 }
 
 -- === СОСТОЯНИЯ ===
@@ -135,9 +61,27 @@ local State = {
     clickedAfterCounter = false,
     currentTarget = nil,
     targetList = {},
-    selectedTargetIndex = 1,
-    playerHighlights = {},
-    espObjects = {},
+}
+
+-- === ОПИСАНИЯ ===
+local Descriptions = {
+    Aim = "Auto aim at target", AimSpeed = "Aim smoothing (0.001-0.1)", 
+    AimFastSpeed = "Fast speed near debris", AimFastOnDebris = "Speed up near debris", 
+    AimY = "Aim up/down (vertical)",
+    TargetMode = "Target selection mode",
+    TargetMaxDistance = "Max target range",
+    ESP = "See players through walls",
+    ESPWhitelist = "White boxes for ignored players",
+    ESPTargets = "Blue boxes for targeted players",
+    ESPNames = "Show names above heads",
+    ESPShowAll = "Show all players (off = important only)",
+    Attack = "Auto clicker", ClickDuration = "Click length (0.05 = instant)", 
+    AttackOnStun = "Attack when stunned", 
+    AttackOnFreeze = "Attack when frozen", AttackDelay = "Delay between attacks", 
+    AutoCrit = "Auto crits", BlackFlash = "Auto BF after block (1 click only)", 
+    BFChance = "BF chance %", Anticounter = "Auto block counter attacks",
+    Block = "Auto block incoming attacks", BlockM1 = "Block enemy clicks", 
+    BlockDebris = "Block debris", BlockCounter = "Block Projectile/Atomic Counter",
 }
 
 -- === УТИЛИТЫ ===
@@ -157,17 +101,9 @@ local function hasOurRagdoll(char)
     return State.ragdollActive or char:FindFirstChild(COMBAT.RAGDOLL) ~= nil
 end
 
-local function isWhitelisted(player)
-    return Config.Whitelist[player.UserId] == true
-end
-
-local function isTargeted(player)
-    return Config.Targets[player.UserId] == true
-end
-
 -- === КОМБАТ ФУНКЦИИ ===
 local function sendAction(action, key)
-    local char = localPlayer.Character
+    local char = player.Character
     if not char then return end
     local comm = char:FindFirstChild("Communicate")
     if not comm then return end
@@ -198,7 +134,7 @@ local function doInstantClick()
     task.wait(Config.ClickDuration)
     sendAction("LeftClickRelease", Enum.UserInputType.MouseButton1)
     
-    -- Black Flash chance
+    -- Black Flash
     if Config.BlackFlash and math.random(1, 100) <= Config.BFChance then
         task.wait(0.1)
         sendAction("LeftClick", Enum.UserInputType.MouseButton1)
@@ -232,11 +168,10 @@ end
 
 local function rotateToTarget()
     if not Config.Aim then return end
-    if not Config.Enabled then return end
-    if hasOurRagdoll(localPlayer.Character) then return end
+    if hasOurRagdoll(player.Character) then return end
     if not State.currentTarget or not State.currentTarget.HRP then return end
     
-    local char = localPlayer.Character
+    local char = player.Character
     if not char then return end
     local hrp = char:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
@@ -244,29 +179,23 @@ local function rotateToTarget()
     local targetPos = State.currentTarget.HRP.Position
     local myPos = hrp.Position
     
-    local dir = Vector3.new(targetPos.X - myPos.X, 0, targetPos.Z - myPos.Z).Unit
-    local targetCFrame = CFrame.new(myPos, myPos + dir)
-    
+    local dir
     if Config.AimY then
         dir = (targetPos - myPos).Unit
-        targetCFrame = CFrame.new(myPos, myPos + dir)
+    else
+        dir = Vector3.new(targetPos.X - myPos.X, 0, targetPos.Z - myPos.Z).Unit
     end
     
-    if Config.AimSmoothing then
-        local currentSpeed = (State.hadDebrisLastFrame and Config.AimFastOnDebris) 
-            and Config.AimFastSpeed or Config.AimSpeed
-        hrp.CFrame = hrp.CFrame:Lerp(targetCFrame, currentSpeed)
-    else
-        hrp.CFrame = targetCFrame
-    end
+    local speed = (State.hadDebrisLastFrame and Config.AimFastOnDebris) 
+        and Config.AimFastSpeed or Config.AimSpeed
+    
+    hrp.CFrame = hrp.CFrame:Lerp(CFrame.new(myPos, myPos + dir), speed)
 end
 
 -- === ОБНОВЛЕНИЕ ЦЕЛЕЙ ===
 local function updateTargetList()
-    if not Config.Enabled then return end
-    
     State.targetList = {}
-    local char = localPlayer.Character
+    local char = player.Character
     if not char then return end
     local hrp = char:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
@@ -281,9 +210,9 @@ local function updateTargetList()
             if otherHrp and otherHum and otherHum.Health > 0 then
                 local dist = (hrp.Position - otherHrp.Position).Magnitude
                 if dist < Config.TargetMaxDistance then
-                    local player = Players:GetPlayerFromCharacter(obj)
-                    local isWl = player and isWhitelisted(player)
-                    local isTg = player and isTargeted(player)
+                    local pl = Players:GetPlayerFromCharacter(obj)
+                    local isWl = pl and Config.Whitelist[pl.UserId]
+                    local isTg = pl and Config.Targets[pl.UserId]
                     
                     table.insert(State.targetList, {
                         Name = obj.Name,
@@ -291,11 +220,9 @@ local function updateTargetList()
                         HRP = otherHrp,
                         Humanoid = otherHum,
                         Distance = dist,
-                        Player = player,
+                        Player = pl,
                         IsWhitelisted = isWl,
                         IsTargeted = isTg,
-                        Health = otherHum.Health,
-                        MaxHealth = otherHum.MaxHealth,
                     })
                 end
             end
@@ -305,26 +232,20 @@ local function updateTargetList()
     -- Сортировка
     if Config.TargetMode == "Nearest" then
         table.sort(State.targetList, function(a, b) return a.Distance < b.Distance end)
-    elseif Config.TargetMode == "LowestHP" then
-        table.sort(State.targetList, function(a, b) return (a.Health/a.MaxHealth) < (b.Health/b.MaxHealth) end)
-    elseif Config.TargetMode == "Manual" then
-        -- Ручной порядок
     end
     
-    -- Приоритет для Targets
+    -- Приоритет Targets
     table.sort(State.targetList, function(a, b)
         if a.IsTargeted and not b.IsTargeted then return true end
         if not a.IsTargeted and b.IsTargeted then return false end
         return false
     end)
     
-    -- Автовыбор цели
-    if Config.AutoTarget and not State.currentTarget and #State.targetList > 0 then
+    -- Выбор цели
+    if not State.currentTarget and #State.targetList > 0 then
         State.currentTarget = State.targetList[1]
-        State.selectedTargetIndex = 1
     end
     
-    -- Обновление дистанции текущей цели
     if State.currentTarget and State.currentTarget.HRP then
         State.currentTarget.Distance = (hrp.Position - State.currentTarget.HRP.Position).Magnitude
         if State.currentTarget.Distance > Config.TargetMaxDistance then
@@ -333,147 +254,13 @@ local function updateTargetList()
     end
 end
 
--- === ESP СИСТЕМА ===
-local function updateESP()
-    if not Config.ESP or not Config.Enabled then
-        for _, obj in pairs(State.espObjects) do
-            if obj.Highlight then obj.Highlight:Destroy() end
-            if obj.NameTag then obj.NameTag:Destroy() end
-        end
-        State.espObjects = {}
-        return
-    end
-    
-    local char = localPlayer.Character
-    if not char then return end
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
-    
-    -- Очистка старых
-    for id, obj in pairs(State.espObjects) do
-        local stillValid = false
-        for _, target in pairs(State.targetList) do
-            if target.Player and target.Player.UserId == id then
-                stillValid = true
-                break
-            end
-        end
-        if not stillValid then
-            if obj.Highlight then obj.Highlight:Destroy() end
-            if obj.NameTag then obj.NameTag:Destroy() end
-            State.espObjects[id] = nil
-        end
-    end
-    
-    -- Создание/обновление
-    for _, target in pairs(State.targetList) do
-        if not target.Player then continue end
-        local id = target.Player.UserId
-        local dist = target.Distance
-        
-        if dist > Config.ESPMaxDistance then continue end
-        if not Config.ESPShowAll and target.IsWhitelisted then continue end
-        
-        local hasCounter = hasProjectileCounter(target)
-        local isWl = target.IsWhitelisted
-        local isTg = target.IsTargeted
-        
-        if not State.espObjects[id] then
-            State.espObjects[id] = {}
-        end
-        local esp = State.espObjects[id]
-        
-        -- Highlight
-        if not esp.Highlight or esp.Highlight.Parent ~= target.Model then
-            if esp.Highlight then esp.Highlight:Destroy() end
-            esp.Highlight = Instance.new("Highlight")
-            esp.Highlight.Name = "LV_ESP"
-            esp.Highlight.Parent = target.Model
-        end
-        
-        -- Цвета
-        if Config.ESPCounters and hasCounter then
-            esp.Highlight.FillColor = Color3.fromRGB(255, 0, 0)
-            esp.Highlight.OutlineColor = Color3.fromRGB(255, 50, 50)
-            esp.Highlight.FillTransparency = 0.3
-        elseif Config.ESPTargets and isTg then
-            esp.Highlight.FillColor = Color3.fromRGB(100, 150, 255)
-            esp.Highlight.OutlineColor = Color3.fromRGB(150, 200, 255)
-            esp.Highlight.FillTransparency = 0.5
-        elseif Config.ESPWhitelist and isWl then
-            esp.Highlight.FillColor = Color3.fromRGB(255, 255, 255)
-            esp.Highlight.OutlineColor = Color3.fromRGB(200, 200, 200)
-            esp.Highlight.FillTransparency = 0.8
-        else
-            esp.Highlight.FillColor = Color3.fromRGB(100, 255, 100)
-            esp.Highlight.OutlineColor = Color3.fromRGB(150, 255, 150)
-            esp.Highlight.FillTransparency = 0.7
-        end
-        esp.Highlight.OutlineTransparency = 0
-        esp.Highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-        
-        -- NameTag
-        if Config.ESPNames then
-            if not esp.NameTag or not esp.NameTag.Parent then
-                if esp.NameTag then esp.NameTag:Destroy() end
-                esp.NameTag = Instance.new("BillboardGui")
-                esp.NameTag.Name = "LV_Name"
-                esp.NameTag.Size = UDim2.new(0, 100, 0, 40)
-                esp.NameTag.StudsOffset = Vector3.new(0, 3, 0)
-                esp.NameTag.AlwaysOnTop = true
-                esp.NameTag.Parent = target.Model:FindFirstChild("Head") or target.Model
-                
-                local label = Instance.new("TextLabel", esp.NameTag)
-                label.Name = "MainLabel"
-                label.Size = UDim2.new(1, 0, 0.5, 0)
-                label.BackgroundTransparency = 1
-                label.TextColor3 = Color3.fromRGB(255, 255, 255)
-                label.TextStrokeTransparency = 0.5
-                label.TextSize = 14
-                label.Font = Enum.Font.GothamBold
-                
-                local distLabel = Instance.new("TextLabel", esp.NameTag)
-                distLabel.Name = "DistLabel"
-                distLabel.Size = UDim2.new(1, 0, 0.5, 0)
-                distLabel.Position = UDim2.new(0, 0, 0.5, 0)
-                distLabel.BackgroundTransparency = 1
-                distLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
-                distLabel.TextStrokeTransparency = 0.5
-                distLabel.TextSize = 12
-                distLabel.Font = Enum.Font.Gotham
-            end
-            
-            local label = esp.NameTag:FindFirstChild("MainLabel")
-            local distLabel = esp.NameTag:FindFirstChild("DistLabel")
-            
-            if label then
-                local status = ""
-                if hasCounter then status = " [COUNTER]" end
-                if isTg then status = " [TARGET]" end
-                if isWl then status = " [IGNORE]" end
-                label.Text = target.Name .. status
-            end
-            if distLabel and Config.ESPDistance then
-                distLabel.Text = string.format("%.1fm", dist)
-            elseif distLabel then
-                distLabel.Text = ""
-            end
-        end
-    end
-end
-
 -- === ГЛАВНЫЙ КОМБАТ ЦИКЛ ===
 local function combatLoop()
-    if not Config.Enabled then
-        if State.isBlocking then setBlock(false) end
-        return
-    end
-    
     local now = tick()
-    local char = localPlayer.Character
+    local char = player.Character
     if not char then return end
     
-    -- Проверка статусов цели
+    -- Проверки статусов
     local hasDebrisNow = false
     local hasCounterNow = false
     local hasStunNow = false
@@ -501,7 +288,7 @@ local function combatLoop()
     
     -- Отпускание блока когда Debris пропал
     if State.hadDebrisLastFrame and not hasDebrisNow then
-        if State.isBlocking and Config.Block then
+        if State.isBlocking then
             setBlock(false)
         end
         State.smallDebrisEndTime = now
@@ -512,10 +299,7 @@ local function combatLoop()
     -- Поворот к цели
     rotateToTarget()
     
-    -- Обновление ESP
-    updateESP()
-    
-    -- Обновление целей каждые 0.3 сек
+    -- Обновление целей
     if now % 0.3 < 0.02 then
         updateTargetList()
     end
@@ -591,751 +375,911 @@ local function combatLoop()
         if not attacking and State.wasAttacking then
             State.wasAttacking = false
             setBlock(false)
-            
-            if Config.AttackAfterBlock and State.currentTarget.Distance <= COMBAT.ATTACK_RANGE then
+            if State.currentTarget.Distance <= COMBAT.ATTACK_RANGE then
                 doInstantClick()
             end
         end
     end
 end
 
--- === GUI СИСТЕМА (из первого скрипта, адаптированная) ===
-local function createGUI()
-    local gui = Instance.new("ScreenGui")
-    gui.Name = "LightVulnerability"
-    gui.ResetOnSpawn = false
-    gui.Parent = localPlayer:WaitForChild("PlayerGui")
+-- === GUI СИСТЕМА (твой стиль) ===
+local gui = Instance.new("ScreenGui")
+gui.Name = "LightUI"
+gui.ResetOnSpawn = false
+gui.Parent = player:WaitForChild("PlayerGui")
+
+local frame = Instance.new("Frame")
+frame.Size = UDim2.new(0, 480, 0, 280)
+frame.Position = UDim2.new(0.5, -240, 0.5, -140)
+frame.BackgroundColor3 = Color3.fromRGB(255, 255, 0)
+frame.BorderSizePixel = 0
+frame.ClipsDescendants = true
+frame.Parent = gui
+Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 6)
+
+local dragging, dragStart, startPos = false, nil, nil
+frame.InputBegan:Connect(function(i) 
+    if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then 
+        dragging, dragStart, startPos = true, i.Position, frame.Position 
+    end 
+end)
+frame.InputChanged:Connect(function(i) 
+    if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then 
+        local d = i.Position - dragStart 
+        frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y) 
+    end 
+end)
+frame.InputEnded:Connect(function() dragging = false end)
+
+local titleBar = Instance.new("Frame", frame)
+titleBar.Size = UDim2.new(1, 0, 0, 26)
+titleBar.BackgroundColor3 = Color3.fromRGB(255, 235, 50)
+
+local titleText = Instance.new("TextLabel", titleBar)
+titleText.Size = UDim2.new(1, -80, 1, 0)
+titleText.Position = UDim2.new(0, 8, 0, 0)
+titleText.BackgroundTransparency = 1
+titleText.Text = "LIGHT V2 - COMBAT"
+titleText.TextColor3 = Color3.fromRGB(0, 0, 0)
+titleText.TextSize = 13
+titleText.Font = Enum.Font.GothamBold
+titleText.TextXAlignment = Enum.TextXAlignment.Left
+
+local minBtn = Instance.new("TextButton", titleBar)
+minBtn.Size = UDim2.new(0, 24, 0, 22)
+minBtn.Position = UDim2.new(1, -52, 0, 2)
+minBtn.BackgroundColor3 = Color3.fromRGB(255, 200, 0)
+minBtn.Text = "-"
+minBtn.TextColor3 = Color3.fromRGB(0, 0, 0)
+minBtn.TextSize = 14
+minBtn.Font = Enum.Font.GothamBold
+Instance.new("UICorner", minBtn).CornerRadius = UDim.new(0, 4)
+
+local closeBtn = Instance.new("TextButton", titleBar)
+closeBtn.Size = UDim2.new(0, 24, 0, 22)
+closeBtn.Position = UDim2.new(1, -27, 0, 2)
+closeBtn.BackgroundColor3 = Color3.fromRGB(255, 80, 80)
+closeBtn.Text = "X"
+closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+closeBtn.TextSize = 12
+closeBtn.Font = Enum.Font.GothamBold
+Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 4)
+
+local sidebar = Instance.new("Frame", frame)
+sidebar.Size = UDim2.new(0, 70, 1, -26)
+sidebar.Position = UDim2.new(0, 0, 0, 26)
+sidebar.BackgroundColor3 = Color3.fromRGB(255, 240, 80)
+
+local contentFrame = Instance.new("ScrollingFrame", frame)
+contentFrame.Size = UDim2.new(1, -78, 1, -36)
+contentFrame.Position = UDim2.new(0, 74, 0, 30)
+contentFrame.BackgroundTransparency = 1
+contentFrame.ScrollBarThickness = 2
+contentFrame.ScrollBarImageColor3 = Color3.fromRGB(150, 150, 0)
+Instance.new("UIListLayout", contentFrame).Padding = UDim.new(0, 4)
+
+local tabs = {"MAIN", "AIM", "TARGET", "ATK", "BLOCK", "ESP", "CONFIG"}
+local tabButtons, tabContents, currentTab, toggleRefs = {}, {}, nil, {}
+
+local function createTabButton(name, index)
+    local b = Instance.new("TextButton", sidebar)
+    b.Size = UDim2.new(1, -4, 0, 24)
+    b.Position = UDim2.new(0, 2, 0, (index-1) * 27 + 3)
+    b.BackgroundColor3 = Color3.fromRGB(255, 255, 100)
+    b.Text = name
+    b.TextColor3 = Color3.fromRGB(80, 80, 0)
+    b.TextSize = 9
+    b.Font = Enum.Font.GothamBold
+    Instance.new("UICorner", b).CornerRadius = UDim.new(0, 5)
+    return b
+end
+
+local function createTabContent(name)
+    local f = Instance.new("Frame", contentFrame)
+    f.Name = name
+    f.Size = UDim2.new(1, 0, 0, 0)
+    f.BackgroundTransparency = 1
+    f.Visible = false
+    f.AutomaticSize = Enum.AutomaticSize.Y
+    Instance.new("UIListLayout", f).Padding = UDim.new(0, 4)
+    return f
+end
+
+for i, t in ipairs(tabs) do 
+    tabButtons[t] = createTabButton(t, i) 
+    tabContents[t] = createTabContent(t) 
+end
+
+local function switchTab(n)
+    currentTab = n
+    for name, c in pairs(tabContents) do c.Visible = name == n end
+    for name, b in pairs(tabButtons) do 
+        b.BackgroundColor3 = name == n and Color3.fromRGB(255, 220, 0) or Color3.fromRGB(255, 255, 100) 
+        b.TextColor3 = name == n and Color3.fromRGB(0, 0, 0) or Color3.fromRGB(100, 100, 0) 
+    end
+end
+
+for n, b in pairs(tabButtons) do 
+    b.MouseButton1Click:Connect(function() switchTab(n) end) 
+end
+
+local function createInfoButton(p, k)
+    local i = Instance.new("TextButton", p)
+    i.Size = UDim2.new(0, 16, 0, 16)
+    i.Position = UDim2.new(0, -20, 0.5, -8)
+    i.BackgroundColor3 = Color3.fromRGB(100, 100, 255)
+    i.Text = "?"
+    i.TextColor3 = Color3.fromRGB(255, 255, 255)
+    i.TextSize = 9
+    i.Font = Enum.Font.GothamBold
+    Instance.new("UICorner", i).CornerRadius = UDim.new(1, 0)
     
-    local frame = Instance.new("Frame")
-    frame.Size = UDim2.new(0, 520, 0, 320)
-    frame.Position = UDim2.new(0.5, -260, 0.5, -160)
-    frame.BackgroundColor3 = Color3.fromRGB(255, 255, 200)
-    frame.BorderSizePixel = 0
-    frame.ClipsDescendants = true
-    frame.Parent = gui
+    local t = Instance.new("TextLabel", i)
+    t.Size = UDim2.new(0, 160, 0, 0)
+    t.Position = UDim2.new(0, 20, 0, -5)
+    t.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+    t.Text = Descriptions[k] or "No info"
+    t.TextColor3 = Color3.fromRGB(255, 255, 255)
+    t.TextSize = 9
+    t.Font = Enum.Font.Gotham
+    t.TextWrapped = true
+    t.Visible = false
+    t.AutomaticSize = Enum.AutomaticSize.Y
+    Instance.new("UICorner", t).CornerRadius = UDim.new(0, 4)
     
-    local corner = Instance.new("UICorner", frame)
-    corner.CornerRadius = UDim.new(0, 8)
+    i.MouseEnter:Connect(function() t.Visible = true end)
+    i.MouseLeave:Connect(function() t.Visible = false end)
+end
+
+local function updateToggleVisual(k, state)
+    if toggleRefs[k] then
+        TweenService:Create(toggleRefs[k].bg, TweenInfo.new(0.2), {BackgroundColor3 = state and Color3.fromRGB(0, 200, 0) or Color3.fromRGB(150, 150, 150)}):Play()
+        TweenService:Create(toggleRefs[k].knob, TweenInfo.new(0.2), {Position = state and UDim2.new(1, -14, 0.5, -6) or UDim2.new(0, 2, 0.5, -6)}):Play()
+    end
+end
+
+local function createToggle(p, n, k, d)
+    local c = Instance.new("Frame", p)
+    c.Size = UDim2.new(1, -26, 0, d and 42 or 30)
+    c.Position = UDim2.new(0, 26, 0, 0)
+    c.BackgroundColor3 = Color3.fromRGB(255, 255, 150)
+    Instance.new("UICorner", c).CornerRadius = UDim.new(0, 5)
     
-    -- Dragging
-    local dragging, dragStart, startPos = false, nil, nil
-    frame.InputBegan:Connect(function(i)
-        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
-            dragging, dragStart, startPos = true, i.Position, frame.Position
-        end
+    createInfoButton(c, k)
+    
+    local l = Instance.new("TextLabel", c)
+    l.Size = UDim2.new(1, -90, 0, 14)
+    l.Position = UDim2.new(0, 6, 0, 3)
+    l.BackgroundTransparency = 1
+    l.Text = n
+    l.TextColor3 = Color3.fromRGB(0, 0, 0)
+    l.TextSize = 10
+    l.Font = Enum.Font.GothamBold
+    l.TextXAlignment = Enum.TextXAlignment.Left
+    
+    if d then 
+        local x = Instance.new("TextLabel", c) 
+        x.Size = UDim2.new(1, -90, 0, 22) 
+        x.Position = UDim2.new(0, 6, 0, 16) 
+        x.BackgroundTransparency = 1 
+        x.Text = d 
+        x.TextColor3 = Color3.fromRGB(100, 100, 0) 
+        x.TextSize = 8 
+        x.Font = Enum.Font.Gotham 
+        x.TextXAlignment = Enum.TextXAlignment.Left 
+        x.TextWrapped = true 
+    end
+    
+    local bg = Instance.new("Frame", c)
+    bg.Name = "ToggleBg"
+    bg.Size = UDim2.new(0, 32, 0, 16)
+    bg.Position = UDim2.new(1, -38, 0.5, -8)
+    bg.BackgroundColor3 = Config[k] and Color3.fromRGB(0, 200, 0) or Color3.fromRGB(150, 150, 150)
+    Instance.new("UICorner", bg).CornerRadius = UDim.new(1, 0)
+    
+    local knob = Instance.new("Frame", bg)
+    knob.Name = "Knob"
+    knob.Size = UDim2.new(0, 12, 0, 12)
+    knob.Position = Config[k] and UDim2.new(1, -14, 0.5, -6) or UDim2.new(0, 2, 0.5, -6)
+    knob.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    Instance.new("UICorner", knob).CornerRadius = UDim.new(1, 0)
+    
+    toggleRefs[k] = {bg = bg, knob = knob, key = k}
+    
+    local function update(s)
+        Config[k] = s
+        updateToggleVisual(k, s)
+    end
+    
+    c.InputBegan:Connect(function(i) 
+        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then 
+            update(not Config[k]) 
+        end 
     end)
-    frame.InputChanged:Connect(function(i)
-        if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
-            local d = i.Position - dragStart
-            frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y)
-        end
-    end)
-    frame.InputEnded:Connect(function() dragging = false end)
     
-    -- Title Bar
-    local titleBar = Instance.new("Frame", frame)
-    titleBar.Size = UDim2.new(1, 0, 0, 30)
-    titleBar.BackgroundColor3 = Color3.fromRGB(255, 255, 100)
-    titleBar.BorderSizePixel = 0
+    return c
+end
+
+local function createInput(p, n, k, num)
+    local c = Instance.new("Frame", p)
+    c.Size = UDim2.new(1, -26, 0, 30)
+    c.Position = UDim2.new(0, 26, 0, 0)
+    c.BackgroundColor3 = Color3.fromRGB(255, 255, 150)
+    Instance.new("UICorner", c).CornerRadius = UDim.new(0, 5)
+    createInfoButton(c, k)
     
-    local titleText = Instance.new("TextLabel", titleBar)
-    titleText.Size = UDim2.new(1, -100, 1, 0)
-    titleText.Position = UDim2.new(0, 10, 0, 0)
-    titleText.BackgroundTransparency = 1
-    titleText.Text = "⚡ LIGHT VULNERABILITY v2.0"
-    titleText.TextColor3 = Color3.fromRGB(80, 80, 80)
-    titleText.TextSize = 14
-    titleText.Font = Enum.Font.GothamBold
-    titleText.TextXAlignment = Enum.TextXAlignment.Left
+    local l = Instance.new("TextLabel", c)
+    l.Size = UDim2.new(0.5, 0, 1, 0)
+    l.Position = UDim2.new(0, 6, 0, 0)
+    l.BackgroundTransparency = 1
+    l.Text = n
+    l.TextColor3 = Color3.fromRGB(0, 0, 0)
+    l.TextSize = 10
+    l.Font = Enum.Font.GothamBold
+    l.TextXAlignment = Enum.TextXAlignment.Left
     
-    local minBtn = Instance.new("TextButton", titleBar)
-    minBtn.Size = UDim2.new(0, 26, 0, 24)
-    minBtn.Position = UDim2.new(1, -56, 0, 3)
-    minBtn.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
-    minBtn.Text = "-"
-    minBtn.TextColor3 = Color3.fromRGB(80, 80, 80)
-    minBtn.TextSize = 14
-    minBtn.Font = Enum.Font.GothamBold
-    minBtn.BorderSizePixel = 0
+    local b = Instance.new("TextBox", c)
+    b.Size = UDim2.new(0, 55, 0, 20)
+    b.Position = UDim2.new(1, -61, 0.5, -10)
+    b.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    b.Text = tostring(Config[k])
+    b.TextColor3 = Color3.fromRGB(0, 0, 0)
+    b.TextSize = 10
+    b.Font = Enum.Font.Gotham
+    b.ClearTextOnFocus = false
+    Instance.new("UICorner", b).CornerRadius = UDim.new(0, 4)
     
-    local closeBtn = Instance.new("TextButton", titleBar)
-    closeBtn.Size = UDim2.new(0, 26, 0, 24)
-    closeBtn.Position = UDim2.new(1, -29, 0, 3)
-    closeBtn.BackgroundColor3 = Color3.fromRGB(255, 150, 150)
-    closeBtn.Text = "X"
-    closeBtn.TextColor3 = Color3.fromRGB(80, 80, 80)
-    closeBtn.TextSize = 12
-    closeBtn.Font = Enum.Font.GothamBold
-    closeBtn.BorderSizePixel = 0
-    
-    closeBtn.MouseButton1Click:Connect(function()
-        gui:Destroy()
-        Config.Enabled = false
+    b.FocusLost:Connect(function() 
+        if num then 
+            local x = tonumber(b.Text) 
+            if x then Config[k] = x else b.Text = tostring(Config[k]) end 
+        else 
+            Config[k] = b.Text 
+        end 
     end)
     
-    local minimized = false
-    minBtn.MouseButton1Click:Connect(function()
-        minimized = not minimized
-        sidebar.Visible = not minimized
-        contentFrame.Visible = not minimized
-        frame.Size = minimized and UDim2.new(0, 520, 0, 30) or UDim2.new(0, 520, 0, 320)
-        minBtn.Text = minimized and "+" or "-"
+    return c
+end
+
+local function createDropdown(p, n, k, o)
+    local c = Instance.new("Frame", p)
+    c.Size = UDim2.new(1, -26, 0, 30)
+    c.Position = UDim2.new(0, 26, 0, 0)
+    c.BackgroundColor3 = Color3.fromRGB(255, 255, 150)
+    Instance.new("UICorner", c).CornerRadius = UDim.new(0, 5)
+    createInfoButton(c, k)
+    
+    local l = Instance.new("TextLabel", c)
+    l.Size = UDim2.new(0.4, 0, 1, 0)
+    l.Position = UDim2.new(0, 6, 0, 0)
+    l.BackgroundTransparency = 1
+    l.Text = n
+    l.TextColor3 = Color3.fromRGB(0, 0, 0)
+    l.TextSize = 10
+    l.Font = Enum.Font.GothamBold
+    l.TextXAlignment = Enum.TextXAlignment.Left
+    
+    local b = Instance.new("TextButton", c)
+    b.Size = UDim2.new(0, 100, 0, 20)
+    b.Position = UDim2.new(1, -106, 0.5, -10)
+    b.BackgroundColor3 = Color3.fromRGB(255, 220, 0)
+    b.Text = Config[k]
+    b.TextColor3 = Color3.fromRGB(0, 0, 0)
+    b.TextSize = 9
+    b.Font = Enum.Font.GothamBold
+    Instance.new("UICorner", b).CornerRadius = UDim.new(0, 4)
+    
+    b.MouseButton1Click:Connect(function() 
+        local x = 1 
+        for i, v in ipairs(o) do 
+            if v == Config[k] then x = i break end 
+        end 
+        Config[k] = o[x % #o + 1] 
+        b.Text = Config[k] 
     end)
     
-    -- Sidebar
-    local sidebar = Instance.new("Frame", frame)
-    sidebar.Size = UDim2.new(0, 90, 1, -30)
-    sidebar.Position = UDim2.new(0, 0, 0, 30)
-    sidebar.BackgroundColor3 = Color3.fromRGB(255, 255, 150)
-    sidebar.BorderSizePixel = 0
+    return c
+end
+
+local function createPlayerList(p)
+    local c = Instance.new("Frame", p)
+    c.Size = UDim2.new(1, -26, 0, 170)
+    c.Position = UDim2.new(0, 26, 0, 0)
+    c.BackgroundColor3 = Color3.fromRGB(255, 255, 150)
+    Instance.new("UICorner", c).CornerRadius = UDim.new(0, 5)
     
-    -- Content Frame
-    local contentFrame = Instance.new("ScrollingFrame", frame)
-    contentFrame.Size = UDim2.new(1, -100, 1, -40)
-    contentFrame.Position = UDim2.new(0, 95, 0, 35)
-    contentFrame.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-    contentFrame.BorderSizePixel = 0
-    contentFrame.ScrollBarThickness = 4
-    contentFrame.ScrollBarImageColor3 = Color3.fromRGB(180, 180, 180)
-    contentFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
-    contentFrame.ScrollingDirection = Enum.ScrollingDirection.Y
+    local header = Instance.new("Frame", c)
+    header.Size = UDim2.new(1, 0, 0, 22)
+    header.BackgroundColor3 = Color3.fromRGB(255, 235, 100)
+    Instance.new("UICorner", header).CornerRadius = UDim.new(0, 5)
     
-    -- Tabs
-    local tabs = {"MAIN", "AIM", "TARGET", "ATK", "BLOCK", "ESP", "CONFIG"}
-    local tabButtons, tabContents, currentTab = {}, {}, nil
+    local title = Instance.new("TextLabel", header)
+    title.Size = UDim2.new(1, -10, 1, 0)
+    title.Position = UDim2.new(0, 6, 0, 0)
+    title.BackgroundTransparency = 1
+    title.Text = "PLAYERS  [Click: Ignore -> Target -> None]"
+    title.TextColor3 = Color3.fromRGB(0, 0, 0)
+    title.TextSize = 9
+    title.Font = Enum.Font.GothamBold
+    title.TextXAlignment = Enum.TextXAlignment.Left
     
-    local function createTabButton(name, index)
-        local b = Instance.new("TextButton", sidebar)
-        b.Size = UDim2.new(1, -10, 0, 28)
-        b.Position = UDim2.new(0, 5, 0, (index-1) * 31 + 5)
-        b.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
-        b.Text = name
-        b.TextColor3 = Color3.fromRGB(80, 80, 80)
-        b.TextSize = 11
-        b.Font = Enum.Font.GothamBold
-        b.BorderSizePixel = 0
-        return b
-    end
+    local s = Instance.new("ScrollingFrame", c)
+    s.Size = UDim2.new(1, -8, 1, -50)
+    s.Position = UDim2.new(0, 4, 0, 24)
+    s.BackgroundColor3 = Color3.fromRGB(255, 255, 200)
+    s.BorderSizePixel = 0
+    s.ScrollBarThickness = 2
     
-    local function createTabContent(name)
-        local f = Instance.new("Frame", contentFrame)
-        f.Name = name
-        f.Size = UDim2.new(1, -10, 0, 0)
-        f.Position = UDim2.new(0, 5, 0, 0)
-        f.BackgroundTransparency = 1
-        f.Visible = false
-        f.AutomaticSize = Enum.AutomaticSize.Y
-        return f
-    end
+    local list = Instance.new("UIListLayout", s)
+    list.Padding = UDim.new(0, 2)
     
-    for i, t in ipairs(tabs) do
-        tabButtons[t] = createTabButton(t, i)
-        tabContents[t] = createTabContent(t)
-    end
-    
-    local function switchTab(n)
-        currentTab = n
-        for name, c in pairs(tabContents) do c.Visible = name == n end
-        for name, b in pairs(tabButtons) do
-            b.BackgroundColor3 = name == n and Color3.fromRGB(180, 180, 180) or Color3.fromRGB(200, 200, 200)
-        end
-    end
-    
-    for n, b in pairs(tabButtons) do
-        b.MouseButton1Click:Connect(function() switchTab(n) end)
-    end
-    
-    -- UI Components
-    local toggleRefs = {}
-    local yOffset = 0
-    
-    local function createInfoButton(p, k)
-        local i = Instance.new("TextButton", p)
-        i.Size = UDim2.new(0, 20, 0, 20)
-        i.Position = UDim2.new(0, -26, 0.5, -10)
-        i.BackgroundColor3 = Color3.fromRGB(220, 220, 220)
-        i.Text = "?"
-        i.TextColor3 = Color3.fromRGB(100, 100, 100)
-        i.TextSize = 11
-        i.Font = Enum.Font.GothamBold
-        i.BorderSizePixel = 0
-        
-        local t = Instance.new("TextLabel", i)
-        t.Size = UDim2.new(0, 200, 0, 0)
-        t.Position = UDim2.new(0, 26, 0, 0)
-        t.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-        t.Text = Descriptions[k] or "Нет описания"
-        t.TextColor3 = Color3.fromRGB(220, 220, 220)
-        t.TextSize = 10
-        t.Font = Enum.Font.Gotham
-        t.TextWrapped = true
-        t.Visible = false
-        t.AutomaticSize = Enum.AutomaticSize.Y
-        
-        i.MouseEnter:Connect(function() t.Visible = true end)
-        i.MouseLeave:Connect(function() t.Visible = false end)
-    end
-    
-    local function updateToggleVisual(k, state)
-        if toggleRefs[k] then
-            toggleRefs[k].bg.BackgroundColor3 = state and Color3.fromRGB(120, 200, 120) or Color3.fromRGB(255, 150, 150)
-            toggleRefs[k].knob.Position = state and UDim2.new(1, -18, 0.5, -7) or UDim2.new(0, 2, 0.5, -7)
-        end
-    end
-    
-    local function createToggle(p, n, k, d)
-        local c = Instance.new("Frame", p)
-        c.Size = UDim2.new(1, -30, 0, d and 48 or 36)
-        c.Position = UDim2.new(0, 30, 0, 0)
-        c.BackgroundColor3 = Color3.fromRGB(245, 245, 245)
-        c.BorderSizePixel = 0
-        c.LayoutOrder = yOffset
-        yOffset = yOffset + 1
-        
-        createInfoButton(c, k)
-        
-        local l = Instance.new("TextLabel", c)
-        l.Size = UDim2.new(1, -110, 0, 16)
-        l.Position = UDim2.new(0, 10, 0, 4)
-        l.BackgroundTransparency = 1
-        l.Text = n
-        l.TextColor3 = Color3.fromRGB(80, 80, 80)
-        l.TextSize = 12
-        l.Font = Enum.Font.GothamBold
-        l.TextXAlignment = Enum.TextXAlignment.Left
-        
-        if d then
-            local x = Instance.new("TextLabel", c)
-            x.Size = UDim2.new(1, -110, 0, 22)
-            x.Position = UDim2.new(0, 10, 0, 20)
-            x.BackgroundTransparency = 1
-            x.Text = d
-            x.TextColor3 = Color3.fromRGB(140, 140, 140)
-            x.TextSize = 10
-            x.Font = Enum.Font.Gotham
-            x.TextXAlignment = Enum.TextXAlignment.Left
-            x.TextWrapped = true
-        end
-        
-        local bg = Instance.new("Frame", c)
-        bg.Name = "ToggleBg"
-        bg.Size = UDim2.new(0, 40, 0, 20)
-        bg.Position = UDim2.new(1, -46, 0.5, -10)
-        bg.BackgroundColor3 = Config[k] and Color3.fromRGB(120, 200, 120) or Color3.fromRGB(255, 150, 150)
-        bg.BorderSizePixel = 1
-        bg.BorderColor3 = Color3.fromRGB(255, 255, 255)
-        
-        local knob = Instance.new("Frame", bg)
-        knob.Name = "Knob"
-        knob.Size = UDim2.new(0, 16, 0, 16)
-        knob.Position = Config[k] and UDim2.new(1, -18, 0.5, -8) or UDim2.new(0, 2, 0.5, -8)
-        knob.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-        knob.BorderSizePixel = 0
-        
-        toggleRefs[k] = {bg = bg, knob = knob, key = k}
-        
-        c.InputBegan:Connect(function(i)
-            if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
-                Config[k] = not Config[k]
-                updateToggleVisual(k, Config[k])
-            end
-        end)
-        
-        return c
-    end
-    
-    local function createInput(p, n, k, num, min, max)
-        local c = Instance.new("Frame", p)
-        c.Size = UDim2.new(1, -30, 0, 36)
-        c.Position = UDim2.new(0, 30, 0, 0)
-        c.BackgroundColor3 = Color3.fromRGB(245, 245, 245)
-        c.BorderSizePixel = 0
-        c.LayoutOrder = yOffset
-        yOffset = yOffset + 1
-        
-        createInfoButton(c, k)
-        
-        local l = Instance.new("TextLabel", c)
-        l.Size = UDim2.new(0.5, 0, 1, 0)
-        l.Position = UDim2.new(0, 10, 0, 0)
-        l.BackgroundTransparency = 1
-        l.Text = n
-        l.TextColor3 = Color3.fromRGB(80, 80, 80)
-        l.TextSize = 12
-        l.Font = Enum.Font.GothamBold
-        l.TextXAlignment = Enum.TextXAlignment.Left
-        
-        local b = Instance.new("TextBox", c)
-        b.Size = UDim2.new(0, 70, 0, 24)
-        b.Position = UDim2.new(1, -76, 0.5, -12)
-        b.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-        b.Text = tostring(Config[k])
-        b.TextColor3 = Color3.fromRGB(80, 80, 80)
-        b.TextSize = 12
-        b.Font = Enum.Font.Gotham
-        b.ClearTextOnFocus = false
-        b.BorderSizePixel = 1
-        b.BorderColor3 = Color3.fromRGB(200, 200, 200)
-        
-        b.FocusLost:Connect(function()
-            if num then
-                local x = tonumber(b.Text)
-                if x then
-                    if min and x < min then x = min end
-                    if max and x > max then x = max end
-                    Config[k] = x
-                end
-                b.Text = tostring(Config[k])
-            else
-                Config[k] = b.Text
-            end
-        end)
-        
-        return c
-    end
-    
-    local function createDropdown(p, n, k, o)
-        local c = Instance.new("Frame", p)
-        c.Size = UDim2.new(1, -30, 0, 36)
-        c.Position = UDim2.new(0, 30, 0, 0)
-        c.BackgroundColor3 = Color3.fromRGB(245, 245, 245)
-        c.BorderSizePixel = 0
-        c.LayoutOrder = yOffset
-        yOffset = yOffset + 1
-        
-        createInfoButton(c, k)
-        
-        local l = Instance.new("TextLabel", c)
-        l.Size = UDim2.new(0.4, 0, 1, 0)
-        l.Position = UDim2.new(0, 10, 0, 0)
-        l.BackgroundTransparency = 1
-        l.Text = n
-        l.TextColor3 = Color3.fromRGB(80, 80, 80)
-        l.TextSize = 12
-        l.Font = Enum.Font.GothamBold
-        l.TextXAlignment = Enum.TextXAlignment.Left
-        
-        local b = Instance.new("TextButton", c)
-        b.Size = UDim2.new(0, 120, 0, 24)
-        b.Position = UDim2.new(1, -126, 0.5, -12)
-        b.BackgroundColor3 = Color3.fromRGB(220, 220, 220)
-        b.Text = Config[k]
-        b.TextColor3 = Color3.fromRGB(80, 80, 80)
-        b.TextSize = 11
-        b.Font = Enum.Font.GothamBold
-        b.BorderSizePixel = 1
-        b.BorderColor3 = Color3.fromRGB(255, 255, 255)
-        
-        b.MouseButton1Click:Connect(function()
-            local x = 1
-            for i, v in ipairs(o) do
-                if v == Config[k] then x = i break end
-            end
-            Config[k] = o[x % #o + 1]
-            b.Text = Config[k]
-        end)
-        
-        return c
-    end
-    
-    local function createSection(p, title)
-        local s = Instance.new("TextLabel", p)
-        s.Size = UDim2.new(1, -30, 0, 20)
-        s.Position = UDim2.new(0, 30, 0, 0)
-        s.BackgroundTransparency = 1
-        s.Text = title
-        s.TextColor3 = Color3.fromRGB(150, 150, 150)
-        s.TextSize = 10
-        s.Font = Enum.Font.GothamBold
-        s.TextXAlignment = Enum.TextXAlignment.Left
-        s.LayoutOrder = yOffset
-        yOffset = yOffset + 1
-        return s
-    end
-    
-    -- === ЗАПОЛНЕНИЕ ТАБОВ ===
-    
-    -- MAIN
-    yOffset = 0
-    createSection(tabContents["MAIN"], "ОСНОВНЫЕ НАСТРОЙКИ")
-    createToggle(tabContents["MAIN"], "Включить скрипт", "Enabled", "Главный переключатель всего функционала")
-    
-    -- AIM
-    yOffset = 0
-    createSection(tabContents["AIM"], "НАСТРОЙКИ ПРИЦЕЛИВАНИЯ")
-    createToggle(tabContents["AIM"], "Aimbot", "Aim", "Автоматический поворот к цели")
-    createToggle(tabContents["AIM"], "Плавный поворот", "AimSmoothing", "Использовать интерполяцию")
-    createToggle(tabContents["AIM"], "Поворот по Y (вверх/вниз)", "AimY", "Смотреть выше/ниже цели")
-    createToggle(tabContents["AIM"], "Ускорять при Debris", "AimFastOnDebris", "Быстрее поворачивать когда враг в Debris")
-    createInput(tabContents["AIM"], "Скорость поворота", "AimSpeed", true, 0.001, 0.1)
-    createInput(tabContents["AIM"], "Ускоренная скорость", "AimFastSpeed", true, 0.001, 0.1)
-    
-    -- TARGET
-    yOffset = 0
-    createSection(tabContents["TARGET"], "ВЫБОР ЦЕЛИ")
-    createToggle(tabContents["TARGET"], "Авто-выбор цели", "AutoTarget", "Автоматически выбирать ближайшую цель")
-    createDropdown(tabContents["TARGET"], "Режим выбора", "TargetMode", {"Nearest", "LowestHP", "Manual"})
-    createInput(tabContents["TARGET"], "Макс дистанция", "TargetMaxDistance", true, 5, 50)
-    
-    -- Player List
-    local listSection = Instance.new("Frame", tabContents["TARGET"])
-    listSection.Size = UDim2.new(1, -30, 0, 200)
-    listSection.Position = UDim2.new(0, 30, 0, 0)
-    listSection.BackgroundColor3 = Color3.fromRGB(240, 240, 240)
-    listSection.BorderSizePixel = 0
-    listSection.LayoutOrder = yOffset
-    yOffset = yOffset + 1
-    
-    local listHeader = Instance.new("TextLabel", listSection)
-    listHeader.Size = UDim2.new(1, 0, 0, 26)
-    listHeader.BackgroundColor3 = Color3.fromRGB(230, 230, 230)
-    listHeader.Text = "ИГРОКИ [Клик: Игнор -> Цель -> Обычный]"
-    listHeader.TextColor3 = Color3.fromRGB(100, 100, 100)
-    listHeader.TextSize = 10
-    listHeader.Font = Enum.Font.GothamBold
-    
-    local listScroll = Instance.new("ScrollingFrame", listSection)
-    listScroll.Size = UDim2.new(1, -10, 1, -56)
-    listScroll.Position = UDim2.new(0, 5, 0, 28)
-    listScroll.BackgroundColor3 = Color3.fromRGB(250, 250, 250)
-    listScroll.BorderSizePixel = 0
-    listScroll.ScrollBarThickness = 3
-    
-    local listLayout = Instance.new("UIListLayout", listScroll)
-    listLayout.Padding = UDim.new(0, 2)
-    
-    local function updatePlayerList()
-        for _, ch in pairs(listScroll:GetChildren()) do
-            if ch:IsA("TextButton") then ch:Destroy() end
+    local function update()
+        for _, ch in pairs(s:GetChildren()) do 
+            if ch:IsA("TextButton") then ch:Destroy() end 
         end
         
         local allPlayers = {}
         for _, pl in pairs(Players:GetPlayers()) do
-            if pl ~= localPlayer then
+            if pl ~= player then
                 table.insert(allPlayers, pl)
             end
         end
         
-        table.sort(allPlayers, function(a, b) return a.Name:lower() < b.Name:lower() end)
+        table.sort(allPlayers, function(a, b)
+            return a.Name:lower() < b.Name:lower()
+        end)
         
-        for _, pl in pairs(allPlayers) do
-            local char = pl.Character
+        for _, pl in pairs(allPlayers) do 
             local dist = math.huge
-            if char and char:FindFirstChild("HumanoidRootPart") and localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart") then
-                dist = (char.HumanoidRootPart.Position - localPlayer.Character.HumanoidRootPart.Position).Magnitude
+            if player.Character and player.Character:FindFirstChild("HumanoidRootPart") and pl.Character and pl.Character:FindFirstChild("HumanoidRootPart") then 
+                dist = (pl.Character.HumanoidRootPart.Position - player.Character.HumanoidRootPart.Position).Magnitude 
             end
             
-            local isWl = isWhitelisted(pl)
-            local isTg = isTargeted(pl)
+            local isWhitelisted = Config.Whitelist[pl.UserId] == true
+            local isTargeted = Config.Targets[pl.UserId] == true
             
-            local b = Instance.new("TextButton", listScroll)
-            b.Size = UDim2.new(1, -4, 0, 26)
-            b.BackgroundColor3 = isWl and Color3.fromRGB(255, 255, 255) or (isTg and Color3.fromRGB(180, 200, 255) or Color3.fromRGB(240, 240, 240))
-            b.Text = pl.Name .. " [" .. math.floor(dist) .. "m]" .. (isWl and " [ИГНОР]" or (isTg and " [ЦЕЛЬ]" or ""))
-            b.TextColor3 = Color3.fromRGB(80, 80, 80)
-            b.TextSize = 10
+            local b = Instance.new("TextButton", s)
+            b.Size = UDim2.new(1, -4, 0, 22)
+            
+            if isWhitelisted then
+                b.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+            elseif isTargeted then
+                b.BackgroundColor3 = Color3.fromRGB(100, 150, 255)
+            else
+                b.BackgroundColor3 = Color3.fromRGB(255, 255, 100)
+            end
+            
+            local status = ""
+            if isWhitelisted then status = " [IGNORE]" 
+            elseif isTargeted then status = " [TARGET]" end
+            
+            b.Text = pl.Name .. " [" .. math.floor(dist) .. "m]" .. status
+            b.TextColor3 = Color3.fromRGB(0, 0, 0)
+            b.TextSize = 8
             b.Font = Enum.Font.Gotham
-            b.BorderSizePixel = 0
             
             b.MouseButton1Click:Connect(function()
-                if not isWl and not isTg then
+                if not isWhitelisted and not isTargeted then
                     Config.Whitelist[pl.UserId] = true
-                elseif isWl and not isTg then
+                elseif isWhitelisted and not isTargeted then
                     Config.Whitelist[pl.UserId] = nil
                     Config.Targets[pl.UserId] = true
                 else
                     Config.Whitelist[pl.UserId] = nil
                     Config.Targets[pl.UserId] = nil
                 end
-                updatePlayerList()
+                update()
             end)
         end
         
-        listScroll.CanvasSize = UDim2.new(0, 0, 0, listLayout.AbsoluteContentSize.Y)
+        s.CanvasSize = UDim2.new(0, 0, 0, list.AbsoluteContentSize.Y)
     end
     
-    task.spawn(function()
-        while task.wait(0.5) do
-            if currentTab == "TARGET" then updatePlayerList() end
-        end
+    update()
+    task.spawn(function() 
+        while task.wait(0.5) do 
+            if currentTab == "TARGET" then update() end 
+        end 
     end)
     
-    local clearBtn = Instance.new("TextButton", listSection)
-    clearBtn.Size = UDim2.new(0.9, 0, 0, 22)
-    clearBtn.Position = UDim2.new(0.05, 0, 1, -26)
-    clearBtn.BackgroundColor3 = Color3.fromRGB(220, 220, 220)
-    clearBtn.Text = "Очистить все"
-    clearBtn.TextColor3 = Color3.fromRGB(80, 80, 80)
-    clearBtn.TextSize = 10
-    clearBtn.Font = Enum.Font.GothamBold
-    clearBtn.MouseButton1Click:Connect(function()
+    local btnFrame = Instance.new("Frame", c)
+    btnFrame.Size = UDim2.new(1, -8, 0, 20)
+    btnFrame.Position = UDim2.new(0, 4, 1, -22)
+    btnFrame.BackgroundTransparency = 1
+    
+    local clearAll = Instance.new("TextButton", btnFrame)
+    clearAll.Size = UDim2.new(1, 0, 1, 0)
+    clearAll.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
+    clearAll.Text = "Clear All"
+    clearAll.TextColor3 = Color3.fromRGB(0, 0, 0)
+    clearAll.TextSize = 9
+    clearAll.Font = Enum.Font.GothamBold
+    Instance.new("UICorner", clearAll).CornerRadius = UDim.new(0, 4)
+    
+    clearAll.MouseButton1Click:Connect(function()
         Config.Whitelist = {}
         Config.Targets = {}
-        updatePlayerList()
+        update()
     end)
     
-    -- ATK
-    yOffset = 0
-    createSection(tabContents["ATK"], "НАСТРОЙКИ АТАКИ")
-    createToggle(tabContents["ATK"], "Авто-атака", "Attack", "Автоматические клики")
-    createToggle(tabContents["ATK"], "Клик при Stun", "AttackOnStun", "Атаковать когда враг оглушен")
-    createToggle(tabContents["ATK"], "Клик при Freeze", "AttackOnFreeze", "Атаковать когда враг заморожен")
-    createToggle(tabContents["ATK"], "Клик при Debris", "AttackOnDebris", "Атаковать когда враг в Small Debris")
-    createToggle(tabContents["ATK"], "Клик после блока", "AttackAfterBlock", "Атаковать сразу после отпускания блока")
-    createToggle(tabContents["ATK"], "Авто-криты", "AutoCrit", "Автоматические критические удары")
-    createToggle(tabContents["ATK"], "Black Flash", "BlackFlash", "Авто BF после блока (1 клик)")
-    createInput(tabContents["ATK"], "Шанс BF (%)", "BFChance", true, 0, 100)
-    createInput(tabContents["ATK"], "Задержка атаки", "AttackDelay", true, 0.01, 1)
-    createInput(tabContents["ATK"], "Длительность клика", "ClickDuration", true, 0.01, 0.5)
-    
-    -- BLOCK
-    yOffset = 0
-    createSection(tabContents["BLOCK"], "НАСТРОЙКИ БЛОКА")
-    createToggle(tabContents["BLOCK"], "Авто-блок", "Block", "Автоматически блокировать атаки")
-    createToggle(tabContents["BLOCK"], "Блокировать M1", "BlockM1", "Блокировать обычные атаки врага")
-    createToggle(tabContents["BLOCK"], "Блокировать Debris", "BlockDebris", "Блокировать Small Debris")
-    createToggle(tabContents["BLOCK"], "Блокировать Counter", "BlockCounter", "Блокировать Projectile/Atomic Counter")
-    createToggle(tabContents["BLOCK"], "Anti-Counter", "Anticounter", "Специальная защита от counter-атак")
-    
-    -- ESP
-    yOffset = 0
-    createSection(tabContents["ESP"], "НАСТРОЙКИ ESP")
-    createToggle(tabContents["ESP"], "Включить ESP", "ESP", "Видеть игроков через стены")
-    createToggle(tabContents["ESP"], "Показывать имена", "ESPNames", "Отображать имена над игроками")
-    createToggle(tabContents["ESP"], "Показывать дистанцию", "ESPDistance", "Отображать расстояние до игрока")
-    createToggle(tabContents["ESP"], "Подсветка Counter", "ESPCounters", "Красная подсветка игроков с Counter")
-    createToggle(tabContents["ESP"], "Подсветка Targets", "ESPTargets", "Синяя подсветка приоритетных целей")
-    createToggle(tabContents["ESP"], "Подсветка Whitelist", "ESPWhitelist", "Белая подсветка игнорируемых игроков")
-    createToggle(tabContents["ESP"], "Показывать всех", "ESPShowAll", "Показывать всех (иначе только важных)")
-    createInput(tabContents["ESP"], "Макс дистанция ESP", "ESPMaxDistance", true, 10, 500)
-    
-    -- CONFIG
-    yOffset = 0
-    createSection(tabContents["CONFIG"], "СОХРАНЕНИЕ КОНФИГА")
-    
-    local nameFrame = Instance.new("Frame", tabContents["CONFIG"])
-    nameFrame.Size = UDim2.new(1, -30, 0, 36)
-    nameFrame.Position = UDim2.new(0, 30, 0, 0)
-    nameFrame.BackgroundColor3 = Color3.fromRGB(245, 245, 245)
-    nameFrame.LayoutOrder = yOffset
-    yOffset = yOffset + 1
+    return c
+end
+
+local function createConfigSystem(p)
+    local nameFrame = Instance.new("Frame", p)
+    nameFrame.Size = UDim2.new(1, 0, 0, 28)
+    nameFrame.BackgroundColor3 = Color3.fromRGB(255, 255, 150)
+    Instance.new("UICorner", nameFrame).CornerRadius = UDim.new(0, 5)
     
     local nameLabel = Instance.new("TextLabel", nameFrame)
-    nameLabel.Size = UDim2.new(0.3, 0, 1, 0)
-    nameLabel.Position = UDim2.new(0, 10, 0, 0)
+    nameLabel.Size = UDim2.new(0.25, 0, 1, 0)
+    nameLabel.Position = UDim2.new(0, 6, 0, 0)
     nameLabel.BackgroundTransparency = 1
-    nameLabel.Text = "Имя:"
-    nameLabel.TextColor3 = Color3.fromRGB(80, 80, 80)
-    nameLabel.TextSize = 12
+    nameLabel.Text = "Name:"
+    nameLabel.TextColor3 = Color3.fromRGB(0, 0, 0)
+    nameLabel.TextSize = 10
     nameLabel.Font = Enum.Font.GothamBold
     nameLabel.TextXAlignment = Enum.TextXAlignment.Left
     
     local nameBox = Instance.new("TextBox", nameFrame)
-    nameBox.Size = UDim2.new(0, 140, 0, 24)
-    nameBox.Position = UDim2.new(0, 60, 0.5, -12)
+    nameBox.Size = UDim2.new(0, 120, 0, 20)
+    nameBox.Position = UDim2.new(0, 50, 0.5, -10)
     nameBox.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-    nameBox.Text = "Default"
-    nameBox.TextColor3 = Color3.fromRGB(80, 80, 80)
-    nameBox.TextSize = 12
+    nameBox.Text = Config.CurrentConfig
+    nameBox.TextColor3 = Color3.fromRGB(0, 0, 0)
+    nameBox.TextSize = 10
     nameBox.Font = Enum.Font.Gotham
-    nameBox.BorderSizePixel = 1
-    nameBox.BorderColor3 = Color3.fromRGB(200, 200, 200)
+    Instance.new("UICorner", nameBox).CornerRadius = UDim.new(0, 4)
     
-    local btnFrame = Instance.new("Frame", tabContents["CONFIG"])
-    btnFrame.Size = UDim2.new(1, -30, 0, 36)
-    btnFrame.Position = UDim2.new(0, 30, 0, 0)
+    local btnFrame = Instance.new("Frame", p)
+    btnFrame.Size = UDim2.new(1, 0, 0, 30)
     btnFrame.BackgroundTransparency = 1
-    btnFrame.LayoutOrder = yOffset
-    yOffset = yOffset + 1
     
     local saveBtn = Instance.new("TextButton", btnFrame)
-    saveBtn.Size = UDim2.new(0, 80, 0, 28)
-    saveBtn.Position = UDim2.new(0, 0, 0, 4)
-    saveBtn.BackgroundColor3 = Color3.fromRGB(150, 220, 150)
-    saveBtn.Text = "СОХРАНИТЬ"
-    saveBtn.TextColor3 = Color3.fromRGB(60, 60, 60)
+    saveBtn.Size = UDim2.new(0, 70, 0, 26)
+    saveBtn.Position = UDim2.new(0, 0, 0, 2)
+    saveBtn.BackgroundColor3 = Color3.fromRGB(0, 200, 0)
+    saveBtn.Text = "SAVE"
+    saveBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
     saveBtn.TextSize = 11
     saveBtn.Font = Enum.Font.GothamBold
-    saveBtn.BorderSizePixel = 0
+    Instance.new("UICorner", saveBtn).CornerRadius = UDim.new(0, 5)
     
     local loadBtn = Instance.new("TextButton", btnFrame)
-    loadBtn.Size = UDim2.new(0, 80, 0, 28)
-    loadBtn.Position = UDim2.new(0, 85, 0, 4)
-    loadBtn.BackgroundColor3 = Color3.fromRGB(150, 150, 220)
-    loadBtn.Text = "ЗАГРУЗИТЬ"
-    loadBtn.TextColor3 = Color3.fromRGB(60, 60, 60)
+    loadBtn.Size = UDim2.new(0, 70, 0, 26)
+    loadBtn.Position = UDim2.new(0, 75, 0, 2)
+    loadBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 255)
+    loadBtn.Text = "LOAD"
+    loadBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
     loadBtn.TextSize = 11
     loadBtn.Font = Enum.Font.GothamBold
-    loadBtn.BorderSizePixel = 0
+    Instance.new("UICorner", loadBtn).CornerRadius = UDim.new(0, 5)
     
     local delBtn = Instance.new("TextButton", btnFrame)
-    delBtn.Size = UDim2.new(0, 80, 0, 28)
-    delBtn.Position = UDim2.new(0, 170, 0, 4)
-    delBtn.BackgroundColor3 = Color3.fromRGB(220, 150, 150)
-    delBtn.Text = "УДАЛИТЬ"
-    delBtn.TextColor3 = Color3.fromRGB(60, 60, 60)
+    delBtn.Size = UDim2.new(0, 70, 0, 26)
+    delBtn.Position = UDim2.new(0, 150, 0, 2)
+    delBtn.BackgroundColor3 = Color3.fromRGB(255, 80, 80)
+    delBtn.Text = "DELETE"
+    delBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
     delBtn.TextSize = 11
     delBtn.Font = Enum.Font.GothamBold
-    delBtn.BorderSizePixel = 0
+    Instance.new("UICorner", delBtn).CornerRadius = UDim.new(0, 5)
     
-    local statusLabel = Instance.new("TextLabel", tabContents["CONFIG"])
-    statusLabel.Size = UDim2.new(1, -30, 0, 20)
-    statusLabel.Position = UDim2.new(0, 30, 0, 0)
-    statusLabel.BackgroundTransparency = 1
-    statusLabel.Text = ""
-    statusLabel.TextColor3 = Color3.fromRGB(100, 150, 100)
-    statusLabel.TextSize = 11
-    statusLabel.Font = Enum.Font.Gotham
-    statusLabel.LayoutOrder = yOffset
-    yOffset = yOffset + 1
+    local listFrame = Instance.new("Frame", p)
+    listFrame.Size = UDim2.new(1, 0, 0, 120)
+    listFrame.BackgroundColor3 = Color3.fromRGB(255, 255, 150)
+    Instance.new("UICorner", listFrame).CornerRadius = UDim.new(0, 5)
     
-    -- Config Functions
-    local function saveConfig(name)
+    local listLabel = Instance.new("TextLabel", listFrame)
+    listLabel.Size = UDim2.new(1, -10, 0, 18)
+    listLabel.Position = UDim2.new(0, 6, 0, 3)
+    listLabel.BackgroundTransparency = 1
+    listLabel.Text = "Saved Configs:"
+    listLabel.TextColor3 = Color3.fromRGB(0, 0, 0)
+    listLabel.TextSize = 10
+    listLabel.Font = Enum.Font.GothamBold
+    listLabel.TextXAlignment = Enum.TextXAlignment.Left
+    
+    local scroll = Instance.new("ScrollingFrame", listFrame)
+    scroll.Size = UDim2.new(1, -8, 1, -26)
+    scroll.Position = UDim2.new(0, 4, 0, 22)
+    scroll.BackgroundColor3 = Color3.fromRGB(255, 255, 200)
+    scroll.BorderSizePixel = 0
+    scroll.ScrollBarThickness = 2
+    
+    local listLayout = Instance.new("UIListLayout", scroll)
+    listLayout.Padding = UDim.new(0, 3)
+    
+    local function getConfigData()
         local data = {}
         for k, v in pairs(Config) do
-            if k ~= "Whitelist" and k ~= "Targets" then
+            if k ~= "CurrentConfig" then
                 data[k] = v
             end
         end
-        data.Whitelist = {}
-        data.Targets = {}
-        for id, _ in pairs(Config.Whitelist) do
-            table.insert(data.Whitelist, id)
-        end
-        for id, _ in pairs(Config.Targets) do
-            table.insert(data.Targets, id)
-        end
-        
-        local json = HttpService:JSONEncode(data)
-        local success = pcall(function()
-            writefile("LightVuln_" .. name .. ".json", json)
-        end)
-        return success
+        return data
     end
     
-    local function loadConfig(name)
-        local success, result = pcall(function()
-            return readfile("LightVuln_" .. name .. ".json")
-        end)
-        if success and result then
-            local data = HttpService:JSONDecode(result)
-            for k, v in pairs(data) do
-                if k ~= "Whitelist" and k ~= "Targets" then
-                    Config[k] = v
-                end
+    local function setConfigData(data)
+        for k, v in pairs(data) do
+            if k ~= "CurrentConfig" then
+                Config[k] = v
             end
-            Config.Whitelist = {}
-            Config.Targets = {}
-            if data.Whitelist then
-                for _, id in ipairs(data.Whitelist) do
-                    Config.Whitelist[id] = true
-                end
-            end
-            if data.Targets then
-                for _, id in ipairs(data.Targets) do
-                    Config.Targets[id] = true
-                end
-            end
-            
-            -- Обновить UI
-            for k, _ in pairs(toggleRefs) do
-                updateToggleVisual(k, Config[k])
-            end
-            return true
         end
-        return false
+    end
+    
+    local function updateConfigList()
+        for _, ch in pairs(scroll:GetChildren()) do
+            if ch:IsA("TextButton") then ch:Destroy() end
+        end
+        
+        local success, files = pcall(function()
+            return listfiles("")
+        end)
+        
+        if success and files then
+            for _, file in pairs(files) do
+                local name = file:match("LightV2_(.-)%.json$")
+                if name then
+                    local btn = Instance.new("TextButton", scroll)
+                    btn.Size = UDim2.new(1, -4, 0, 22)
+                    btn.BackgroundColor3 = (name == Config.CurrentConfig) and Color3.fromRGB(0, 200, 100) or Color3.fromRGB(255, 255, 100)
+                    btn.Text = name
+                    btn.TextColor3 = Color3.fromRGB(0, 0, 0)
+                    btn.TextSize = 10
+                    btn.Font = Enum.Font.Gotham
+                    
+                    btn.MouseButton1Click:Connect(function()
+                        Config.CurrentConfig = name
+                        nameBox.Text = name
+                        updateConfigList()
+                    end)
+                end
+            end
+        end
+        
+        scroll.CanvasSize = UDim2.new(0, 0, 0, listLayout.AbsoluteContentSize.Y)
     end
     
     saveBtn.MouseButton1Click:Connect(function()
         local name = nameBox.Text
-        if saveConfig(name) then
-            statusLabel.Text = "✓ Сохранено: " .. name
-            statusLabel.TextColor3 = Color3.fromRGB(100, 150, 100)
-        else
-            statusLabel.Text = "✗ Ошибка сохранения"
-            statusLabel.TextColor3 = Color3.fromRGB(200, 100, 100)
-        end
-        task.wait(2)
-        statusLabel.Text = ""
+        if name == "" then return end
+        local json = HttpService:JSONEncode(getConfigData())
+        pcall(function()
+            writefile("LightV2_" .. name .. ".json", json)
+        end)
+        Config.CurrentConfig = name
+        updateConfigList()
     end)
     
     loadBtn.MouseButton1Click:Connect(function()
         local name = nameBox.Text
-        if loadConfig(name) then
-            statusLabel.Text = "✓ Загружено: " .. name
-            statusLabel.TextColor3 = Color3.fromRGB(100, 150, 100)
-        else
-            statusLabel.Text = "✗ Конфиг не найден"
-            statusLabel.TextColor3 = Color3.fromRGB(200, 100, 100)
+        local success, result = pcall(function()
+            return readfile("LightV2_" .. name .. ".json")
+        end)
+        if success and result then
+            local data = HttpService:JSONDecode(result)
+            setConfigData(data)
+            Config.CurrentConfig = name
+            updateConfigList()
+            for k, refs in pairs(toggleRefs) do
+                if Config[k] ~= nil then
+                    updateToggleVisual(k, Config[k])
+                end
+            end
         end
-        task.wait(2)
-        statusLabel.Text = ""
     end)
     
     delBtn.MouseButton1Click:Connect(function()
         local name = nameBox.Text
-        local success = pcall(function()
-            delfile("LightVuln_" .. name .. ".json")
+        pcall(function()
+            delfile("LightV2_" .. name .. ".json")
         end)
-        if success then
-            statusLabel.Text = "✓ Удалено: " .. name
-            statusLabel.TextColor3 = Color3.fromRGB(100, 150, 100)
-        else
-            statusLabel.Text = "✗ Ошибка удаления"
-            statusLabel.TextColor3 = Color3.fromRGB(200, 100, 100)
+        if Config.CurrentConfig == name then
+            Config.CurrentConfig = "Default"
+            nameBox.Text = "Default"
         end
-        task.wait(2)
-        statusLabel.Text = ""
+        updateConfigList()
     end)
     
-    -- Auto-load default
-    task.delay(1, function()
-        loadConfig("Default")
-    end)
-    
-    switchTab("MAIN")
-    return gui
+    updateConfigList()
 end
+
+local minimized = false
+local minFrame = nil
+
+local function minimizeGui()
+    if minimized then return end
+    minimized = true
+    
+    minFrame = Instance.new("Frame", gui)
+    minFrame.Size = UDim2.new(0, 100, 0, 26)
+    minFrame.Position = UDim2.new(0, 10, 0, 10)
+    minFrame.BackgroundColor3 = Color3.fromRGB(255, 235, 50)
+    minFrame.BackgroundTransparency = 0.3
+    minFrame.BorderSizePixel = 0
+    Instance.new("UICorner", minFrame).CornerRadius = UDim.new(0, 6)
+    
+    local minText = Instance.new("TextLabel", minFrame)
+    minText.Size = UDim2.new(1, -10, 1, 0)
+    minText.Position = UDim2.new(0, 5, 0, 0)
+    minText.BackgroundTransparency = 1
+    minText.Text = "LIGHT V2"
+    minText.TextColor3 = Color3.fromRGB(0, 0, 0)
+    minText.TextSize = 11
+    minText.Font = Enum.Font.GothamBold
+    
+    local minBtnRestore = Instance.new("TextButton", minFrame)
+    minBtnRestore.Size = UDim2.new(1, 0, 1, 0)
+    minBtnRestore.BackgroundTransparency = 1
+    minBtnRestore.Text = ""
+    
+    local minDragging, minDragStart, minStartPos = false, nil, nil
+    minFrame.InputBegan:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+            minDragging, minDragStart, minStartPos = true, i.Position, minFrame.Position
+        end
+    end)
+    minFrame.InputChanged:Connect(function(i)
+        if minDragging and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
+            local d = i.Position - minDragStart
+            minFrame.Position = UDim2.new(minStartPos.X.Scale, minStartPos.X.Offset + d.X, minStartPos.Y.Scale, minStartPos.Y.Offset + d.Y)
+        end
+    end)
+    minFrame.InputEnded:Connect(function() minDragging = false end)
+    
+    minBtnRestore.MouseButton1Click:Connect(function()
+        minimized = false
+        frame.Visible = true
+        minFrame:Destroy()
+        minFrame = nil
+    end)
+    
+    frame.Visible = false
+end
+
+minBtn.MouseButton1Click:Connect(minimizeGui)
+
+closeBtn.MouseButton1Click:Connect(function()
+    Config.Aim = false
+    Config.Attack = false
+    Config.Block = false
+    gui:Destroy()
+end)
+
+-- === ЗАПОЛНЕНИЕ ТАБОВ ===
+
+-- MAIN
+local mainTitle = Instance.new("TextLabel", tabContents.MAIN)
+mainTitle.Size = UDim2.new(1, 0, 0, 26)
+mainTitle.BackgroundTransparency = 1
+mainTitle.Text = "LIGHT VULNERABLE v2.0"
+mainTitle.TextColor3 = Color3.fromRGB(0, 0, 0)
+mainTitle.TextSize = 16
+mainTitle.Font = Enum.Font.GothamBold
+
+local mainDesc = Instance.new("TextLabel", tabContents.MAIN)
+mainDesc.Size = UDim2.new(1, 0, 0, 50)
+mainDesc.Position = UDim2.new(0, 0, 0, 30)
+mainDesc.BackgroundTransparency = 1
+mainDesc.Text = "Advanced combat assistance\nAim | Attack | Block | ESP | Black Flash"
+mainDesc.TextColor3 = Color3.fromRGB(80, 80, 0)
+mainDesc.TextSize = 10
+mainDesc.Font = Enum.Font.Gotham
+mainDesc.TextWrapped = true
+
+local creatorLabel = Instance.new("TextLabel", tabContents.MAIN)
+creatorLabel.Size = UDim2.new(1, 0, 0, 60)
+creatorLabel.Position = UDim2.new(0, 0, 0, 85)
+creatorLabel.BackgroundTransparency = 1
+creatorLabel.Text = "Press Insert to toggle\nClick player: Ignore -> Target -> None\nWhite = Ignore | Blue = Target"
+creatorLabel.TextColor3 = Color3.fromRGB(100, 100, 0)
+creatorLabel.TextSize = 9
+creatorLabel.Font = Enum.Font.Gotham
+creatorLabel.TextWrapped = true
+
+-- AIM
+createToggle(tabContents.AIM, "Aim Assist", "Aim", "Auto aim at target")
+createInput(tabContents.AIM, "Aim Speed", "AimSpeed", true)
+createInput(tabContents.AIM, "Fast Speed", "AimFastSpeed", true)
+createToggle(tabContents.AIM, "Fast on Debris", "AimFastOnDebris")
+createToggle(tabContents.AIM, "Y Axis (Up/Down)", "AimY")
+
+-- TARGET
+createDropdown(tabContents.TARGET, "Target Mode", "TargetMode", {"Nearest", "LowestHP"})
+createInput(tabContents.TARGET, "Max Distance", "TargetMaxDistance", true)
+createPlayerList(tabContents.TARGET)
+
+-- ATK
+createToggle(tabContents.ATK, "Auto Attack", "Attack", "Auto clicker")
+createInput(tabContents.ATK, "Click Duration", "ClickDuration", true)
+createToggle(tabContents.ATK, "On Stun", "AttackOnStun")
+createToggle(tabContents.ATK, "On Freeze", "AttackOnFreeze")
+createInput(tabContents.ATK, "Attack Delay", "AttackDelay", true)
+createToggle(tabContents.ATK, "Auto Crit", "AutoCrit")
+createToggle(tabContents.ATK, "Black Flash", "BlackFlash", "1 click after block only")
+createInput(tabContents.ATK, "BF Chance %", "BFChance", true)
+
+-- BLOCK
+createToggle(tabContents.BLOCK, "Auto Block", "Block", "Block incoming attacks")
+createToggle(tabContents.BLOCK, "Block M1", "BlockM1", "Block enemy clicks")
+createToggle(tabContents.BLOCK, "Block Debris", "BlockDebris", "Block debris/projectiles")
+createToggle(tabContents.BLOCK, "Block Counter", "BlockCounter", "Block Projectile/Atomic Counter")
+createToggle(tabContents.BLOCK, "Anticounter", "Anticounter", "Block counter attacks")
+
+-- ESP
+createToggle(tabContents.ESP, "ESP Enabled", "ESP")
+createToggle(tabContents.ESP, "Show Whitelist", "ESPWhitelist", "White boxes for ignored")
+createToggle(tabContents.ESP, "Show Targets", "ESPTargets", "Blue boxes for targets")
+createToggle(tabContents.ESP, "Show Names", "ESPNames", "Names above heads")
+createToggle(tabContents.ESP, "Show All", "ESPShowAll", "Show all players")
+
+-- CONFIG
+createConfigSystem(tabContents.CONFIG)
+
+switchTab("MAIN")
+
+-- === KEYBINDS (только Insert для toggle) ===
+UIS.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.KeyCode == Enum.KeyCode.Insert then
+        if minimized and minFrame then
+            minimized = false
+            frame.Visible = true
+            minFrame:Destroy()
+            minFrame = nil
+        else
+            frame.Visible = not frame.Visible
+        end
+    end
+end)
+
+-- === DRAWING ESP (твой стиль) ===
+local espBoxes = {}
+local espNames = {}
+
+local function createESP(pl)
+    if pl == player then return end
+    
+    local box = Drawing.new("Square")
+    box.Visible = false
+    box.Thickness = 1
+    box.Transparency = 1
+    box.Filled = false
+    
+    local name = Drawing.new("Text")
+    name.Visible = false
+    name.Size = 13
+    name.Center = true
+    name.Outline = true
+    
+    espBoxes[pl] = box
+    espNames[pl] = name
+    
+    return box, name
+end
+
+local function updateESP()
+    for pl, box in pairs(espBoxes) do
+        local name = espNames[pl]
+        if not pl or not pl.Parent then
+            box.Visible = false
+            name.Visible = false
+            continue
+        end
+        
+        local isWhitelisted = Config.Whitelist[pl.UserId] == true
+        local isTargeted = Config.Targets[pl.UserId] == true
+        
+        local shouldShow = false
+        if Config.ESPShowAll then
+            shouldShow = true
+        else
+            if isWhitelisted and Config.ESPWhitelist then shouldShow = true end
+            if isTargeted and Config.ESPTargets then shouldShow = true end
+        end
+        
+        if not Config.ESP or not shouldShow then
+            box.Visible = false
+            name.Visible = false
+            continue
+        end
+        
+        local char = pl.Character
+        if not char then
+            box.Visible = false
+            name.Visible = false
+            continue
+        end
+        
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        local head = char:FindFirstChild("Head")
+        if not hrp or not head then
+            box.Visible = false
+            name.Visible = false
+            continue
+        end
+        
+        local pos, onScreen = camera:WorldToViewportPoint(hrp.Position)
+        if not onScreen then
+            box.Visible = false
+            name.Visible = false
+            continue
+        end
+        
+        local headPos = camera:WorldToViewportPoint(head.Position + Vector3.new(0, 0.5, 0))
+        local legPos = camera:WorldToViewportPoint(hrp.Position - Vector3.new(0, 3, 0))
+        local boxHeight = math.abs(headPos.Y - legPos.Y)
+        local boxWidth = boxHeight * 0.6
+        
+        if isWhitelisted then
+            box.Color = Color3.fromRGB(255, 255, 255)
+            name.Color = Color3.fromRGB(255, 255, 255)
+        elseif isTargeted then
+            box.Color = Color3.fromRGB(100, 150, 255)
+            name.Color = Color3.fromRGB(100, 150, 255)
+        else
+            box.Color = Color3.fromRGB(255, 100, 100)
+            name.Color = Color3.fromRGB(255, 100, 100)
+        end
+        
+        box.Size = Vector2.new(boxWidth, boxHeight)
+        box.Position = Vector2.new(pos.X - boxWidth/2, pos.Y - boxHeight/2)
+        box.Visible = true
+        
+        name.Position = Vector2.new(pos.X, pos.Y - boxHeight/2 - 15)
+        name.Text = pl.Name
+        name.Visible = Config.ESPNames
+    end
+end
+
+for _, pl in pairs(Players:GetPlayers()) do
+    createESP(pl)
+end
+
+Players.PlayerAdded:Connect(createESP)
+Players.PlayerRemoving:Connect(function(pl)
+    if espBoxes[pl] then
+        espBoxes[pl]:Remove()
+        espNames[pl]:Remove()
+        espBoxes[pl] = nil
+        espNames[pl] = nil
+    end
+end)
+
+RunService.RenderStepped:Connect(updateESP)
 
 -- === ИНИЦИАЛИЗАЦИЯ ===
-local function init()
-    -- Создаем GUI
-    createGUI()
+player.CharacterAdded:Connect(function(newChar)
+    State.isBlocking = false
+    State.wasAttacking = false
+    State.freezeActive = false
+    State.ragdollActive = false
+    State.hadDebrisLastFrame = false
+    State.smallDebrisEndTime = 0
+    State.projectileProtectionEndTime = 0
+    State.currentTarget = nil
+    State.clickedAfterDebris = false
+    State.clickedAfterStun = false
+    State.clickedAfterFreeze = false
+    State.clickedAfterCounter = false
     
-    -- Character events
-    localPlayer.CharacterAdded:Connect(function(newChar)
-        State.isBlocking = false
-        State.wasAttacking = false
-        State.freezeActive = false
-        State.ragdollActive = false
-        State.hadDebrisLastFrame = false
-        State.smallDebrisEndTime = 0
-        State.projectileProtectionEndTime = 0
-        State.currentTarget = nil
-        State.clickedAfterDebris = false
-        State.clickedAfterStun = false
-        State.clickedAfterFreeze = false
-        State.clickedAfterCounter = false
-        
-        newChar.ChildAdded:Connect(function(child)
-            if child.Name == COMBAT.FREEZE then State.freezeActive = true end
-            if child.Name == COMBAT.RAGDOLL then State.ragdollActive = true end
-        end)
-        
-        newChar.ChildRemoved:Connect(function(child)
-            if child.Name == COMBAT.FREEZE then State.freezeActive = false end
-            if child.Name == COMBAT.RAGDOLL then State.ragdollActive = false end
-        end)
-        
-        task.delay(0.5, function()
-            updateTargetList()
-        end)
+    newChar.ChildAdded:Connect(function(child)
+        if child.Name == COMBAT.FREEZE then State.freezeActive = true end
+        if child.Name == COMBAT.RAGDOLL then State.ragdollActive = true end
     end)
     
-    -- Main loop
-    RunService.Heartbeat:Connect(combatLoop)
+    newChar.ChildRemoved:Connect(function(child)
+        if child.Name == COMBAT.FREEZE then State.freezeActive = false end
+        if child.Name == COMBAT.RAGDOLL then State.ragdollActive = false end
+    end)
     
-    print("⚡ LightVulnerability v2.0 Loaded | BLOCK → INSTANT CLICK | AimY: " .. tostring(Config.AimY))
-end
+    task.delay(0.5, function()
+        updateTargetList()
+    end)
+end)
 
-init()
+-- Main loops
+RunService.Heartbeat:Connect(combatLoop)
+
+print("⚡ LightV2 Combat Loaded | Block → Click | AimY: " .. tostring(Config.AimY))
