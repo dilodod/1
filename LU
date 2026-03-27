@@ -1,36 +1,33 @@
--- LightUILib v3.0 - Улучшенная система вкладок + Конфиг + Singleton
--- Жёлтая тема, динамические вкладки, автосохранение, защита от дублей
+-- LightUILib v3.1 - ИСПРАВЛЕННАЯ ВЕРСИЯ
+-- Исправлено: создание вкладок, русский язык, сохранение конфигов
 
 local LightUILib = {}
 LightUILib.__index = LightUILib
-LightUILib.Version = "3.0"
+LightUILib.Version = "3.1"
 
--- === SINGLETON: Защита от дублирования GUI ===
+-- СЕРВИСЫ
 local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local HttpService = game:GetService("HttpService")
 local UIS = game:GetService("UserInputService")
 
 local LocalPlayer = Players.LocalPlayer
 
--- Уникальный идентификатор для этого GUI (можно менять для разных скриптов)
-local GUI_IDENTIFIER = "YellowUI_Singleton"
+-- УНИКАЛЬНЫЙ ID для этого GUI
+local GUI_IDENTIFIER = "YellowUI_Fixed_" .. tostring(math.random(10000, 99999))
 
--- Удаляем старые GUI с таким же идентификатором
+-- ОЧИСТКА СТАРЫХ GUI
 local function CleanupOldGUI()
     local playerGui = LocalPlayer:WaitForChild("PlayerGui")
     for _, child in ipairs(playerGui:GetChildren()) do
-        if child.Name:find(GUI_IDENTIFIER) or child.Name:find("YellowUI_") then
-            child:Destroy()
-            print("[YellowUI] Удалён старый GUI:", child.Name)
+        if child.Name:find("YellowUI_") or child.Name:find("ScreenGui") then
+            pcall(function() child:Destroy() end)
         end
     end
 end
-
 CleanupOldGUI()
 
--- === ЖЁЛТАЯ ТЕМА ===
+-- ЖЁЛТАЯ ТЕМА
 local YellowTheme = {
     Background = Color3.fromRGB(255, 255, 100),
     Sidebar = Color3.fromRGB(255, 240, 80),
@@ -51,13 +48,13 @@ local YellowTheme = {
     Error = Color3.fromRGB(255, 100, 100)
 }
 
--- === ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ===
+-- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
 local function MakeDraggable(frame, handle)
     local dragging, dragStart, startPos = false, nil, nil
     handle = handle or frame
     
     handle.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
             dragging = true
             dragStart = input.Position
             startPos = frame.Position
@@ -65,14 +62,14 @@ local function MakeDraggable(frame, handle)
     end)
     
     handle.InputChanged:Connect(function(input)
-        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
             local delta = input.Position - dragStart
             frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
         end
     end)
     
     UIS.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
             dragging = false
         end
     end)
@@ -93,7 +90,7 @@ local function CreateStroke(parent, color, thickness)
     return stroke
 end
 
--- === МЕНЕДЖЕР КОНФИГОВ ===
+-- МЕНЕДЖЕР КОНФИГОВ
 local ConfigManager = {}
 ConfigManager.__index = ConfigManager
 
@@ -103,14 +100,14 @@ function ConfigManager.new(window)
     self.Config = {}
     self.ConfigName = "Default"
     self.AutoSaveEnabled = true
-    self.AutoSaveInterval = 30 -- секунды
+    self.AutoSaveInterval = 30
     return self
 end
 
 function ConfigManager:Set(key, value)
     self.Config[key] = value
     if self.AutoSaveEnabled then
-        self:QueueSave()
+        self:Save()
     end
 end
 
@@ -121,117 +118,97 @@ function ConfigManager:Get(key, default)
     return self.Config[key]
 end
 
-function ConfigManager:QueueSave()
-    if self._saveQueued then return end
-    self._saveQueued = true
-    task.delay(1, function()
-        self._saveQueued = false
-        self:Save(self.ConfigName)
-    end)
-end
-
 function ConfigManager:Save(name)
     name = name or self.ConfigName
     local data = {
-        _version = "3.0",
+        _version = "3.1",
         _timestamp = os.time(),
         _tabs = self.Window:GetTabNames(),
         values = {}
     }
     
     for k, v in pairs(self.Config) do
-        if not k:find("^_") then -- не сохраняем системные ключи
+        if type(k) == "string" and not k:find("^_") then
             data.values[k] = v
         end
     end
     
     local success, err = pcall(function()
         local json = HttpService:JSONEncode(data)
-        writefile("YellowUI_" .. name .. ".json", json)
+        if writefile then
+            writefile("YellowUI_" .. name .. ".json", json)
+            print("[YellowUI] Конфиг сохранён:", name)
+        end
     end)
     
-    if success then
-        print("[YellowUI] Конфиг сохранён:", name)
-        return true
-    else
-        warn("[YellowUI] Ошибка сохранения:", err)
-        return false
-    end
+    return success
 end
 
 function ConfigManager:Load(name)
     name = name or self.ConfigName
     local success, result = pcall(function()
-        return readfile("YellowUI_" .. name .. ".json")
+        if readfile then
+            return readfile("YellowUI_" .. name .. ".json")
+        end
+        return nil
     end)
     
     if success and result then
         local data = HttpService:JSONDecode(result)
-        if data.values then
+        if data and data.values then
             for k, v in pairs(data.values) do
                 self.Config[k] = v
             end
+            print("[YellowUI] Конфиг загружен:", name)
+            return data
         end
-        print("[YellowUI] Конфиг загружен:", name)
-        return data
     end
     return nil
 end
 
 function ConfigManager:Delete(name)
     pcall(function()
-        delfile("YellowUI_" .. name .. ".json")
+        if delfile then
+            delfile("YellowUI_" .. name .. ".json")
+        end
     end)
 end
 
 function ConfigManager:GetAllConfigs()
     local configs = {}
-    local success, files = pcall(function()
-        return listfiles("") -- или getgenv().listfiles если доступно
-    end)
-    
-    if success and files then
-        for _, file in ipairs(files) do
-            if file:find("YellowUI_") and file:find("%.json$") then
-                local name = file:gsub("YellowUI_", ""):gsub("%.json", "")
-                table.insert(configs, name)
+    if listfiles then
+        local success, files = pcall(listfiles, "")
+        if success and files then
+            for _, file in ipairs(files) do
+                if type(file) == "string" and file:find("YellowUI_") and file:find("%.json$") then
+                    local confName = file:gsub(".*YellowUI_", ""):gsub("%.json", "")
+                    table.insert(configs, confName)
+                end
             end
         end
     end
     return configs
 end
 
-function ConfigManager:StartAutoSave()
-    task.spawn(function()
-        while self.AutoSaveEnabled and self.Window do
-            task.wait(self.AutoSaveInterval)
-            if self.Window then
-                self:Save(self.ConfigName)
-            end
-        end
-    end)
-end
-
--- === КЛАСС WINDOW ===
+-- ОСНОВНОЕ ОКНО
 local Window = {}
 Window.__index = Window
 
-function Window.new(title, size, options)
-    options = options or {}
+function Window.new(title, size)
     local self = setmetatable({}, Window)
     
     self.Theme = YellowTheme
     self.Tabs = {}
     self.CurrentTab = nil
     self.TabCallbacks = {}
-    self.Elements = {} -- ссылки на все элементы для обновления
+    self.Elements = {}
     
     -- Менеджер конфигов
     self.Config = ConfigManager.new(self)
     
     -- GUI
     self.ScreenGui = Instance.new("ScreenGui")
-    self.ScreenGui.Name = GUI_IDENTIFIER .. "_" .. tostring(math.random(1000, 9999))
+    self.ScreenGui.Name = GUI_IDENTIFIER
     self.ScreenGui.ResetOnSpawn = false
     self.ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
     self.ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
@@ -247,7 +224,7 @@ function Window.new(title, size, options)
     CreateCorner(self.Frame, 12)
     CreateStroke(self.Frame, self.Theme.Border, 2)
     
-    -- Title Bar
+    -- Шапка
     self.TitleBar = Instance.new("Frame")
     self.TitleBar.Size = UDim2.new(1, 0, 0, 40)
     self.TitleBar.BackgroundColor3 = self.Theme.TitleBar
@@ -255,7 +232,7 @@ function Window.new(title, size, options)
     self.TitleBar.Parent = self.Frame
     CreateStroke(self.TitleBar, self.Theme.Border, 1)
     
-    -- Title
+    -- Заголовок
     local titleLabel = Instance.new("TextLabel")
     titleLabel.Size = UDim2.new(1, -150, 1, 0)
     titleLabel.Position = UDim2.new(0, 15, 0, 0)
@@ -301,7 +278,7 @@ function Window.new(title, size, options)
     self.CloseBtn.Parent = self.TitleBar
     CreateCorner(self.CloseBtn, 6)
     
-    -- Sidebar
+    -- Боковая панель
     self.Sidebar = Instance.new("ScrollingFrame")
     self.Sidebar.Size = UDim2.new(0, 130, 1, -40)
     self.Sidebar.Position = UDim2.new(0, 0, 0, 40)
@@ -326,7 +303,7 @@ function Window.new(title, size, options)
     sidebarPadding.PaddingRight = UDim.new(0, 8)
     sidebarPadding.Parent = self.Sidebar
     
-    -- Content Area
+    -- Контент
     self.Content = Instance.new("Frame")
     self.Content.Size = UDim2.new(1, -135, 1, -45)
     self.Content.Position = UDim2.new(0, 132, 0, 42)
@@ -334,21 +311,24 @@ function Window.new(title, size, options)
     self.Content.BorderSizePixel = 0
     self.Content.Parent = self.Frame
     
-    -- Dragging
+    -- Перетаскивание
     MakeDraggable(self.Frame, self.TitleBar)
     
-    -- Обработчики кнопок
+    -- Обработчики
     self.Minimized = false
     self.MinFrame = nil
     
     self.MinBtn.MouseButton1Click:Connect(function() self:Minimize() end)
     self.CloseBtn.MouseButton1Click:Connect(function() self:Destroy() end)
     self.SaveBtn.MouseButton1Click:Connect(function() 
-        self.Config:Save()
-        self:ShowNotification("💾 Конфиг сохранён!")
+        if self.Config:Save() then
+            self:ShowNotification("✅ Конфиг сохранён!")
+        else
+            self:ShowNotification("❌ Ошибка сохранения", true)
+        end
     end)
     
-    -- Hotkey (Insert)
+    -- Hotkey
     UIS.InputBegan:Connect(function(input, gameProcessed)
         if gameProcessed then return end
         if input.KeyCode == Enum.KeyCode.Insert then
@@ -356,26 +336,28 @@ function Window.new(title, size, options)
         end
     end)
     
-    -- Создаём обязательную вкладку настроек
-    self:_CreateSettingsTab()
-    
-    -- Загружаем конфиг
-    self.Config:Load()
-    self.Config:StartAutoSave()
+    -- Создаём вкладку настроек
+    task.spawn(function()
+        task.wait(0.1)
+        self:_CreateSettingsTab()
+        self.Config:Load()
+    end)
     
     return self
 end
 
+-- ВКЛАДКА НАСТРОЕК
 function Window:_CreateSettingsTab()
-    local settingsTab = self:CreateTab("⚙️ Настройки", 0) -- LayoutOrder 0 = первая
+    -- Создаём вкладку настроек ПЕРВОЙ
+    local settingsTab = self:CreateTab("⚙️ Настройки", 0)
     
     -- Секция конфигов
-    self:CreateSection(settingsTab, "Управление конфигами")
-    self:CreateConfigSection(settingsTab)
+    self:CreateSection(settingsTab, "Управление конфигурациями")
+    self:_CreateConfigSection(settingsTab)
     
     -- Секция вкладок
     self:CreateSection(settingsTab, "Управление вкладками")
-    self:CreateTabManagerSection(settingsTab)
+    self:_CreateTabManagerSection(settingsTab)
     
     -- Инфо
     self:CreateSection(settingsTab, "Информация")
@@ -386,29 +368,30 @@ function Window:_CreateSettingsTab()
     CreateCorner(infoFrame, 8)
     CreateStroke(infoFrame, self.Theme.Border, 1)
     
-    local infoText = Instance.new("TextLabel")
-    infoText.Size = UDim2.new(0.9, 0, 0.9, 0)
-    infoText.Position = UDim2.new(0.05, 0, 0.05, 0)
-    infoText.BackgroundTransparency = 1
-    infoText.Text = "Версия: " .. LightUILib.Version .. "\nВкладок: " .. #self.Tabs .. "\nАвтосохранение: ON\n"
-    infoText.TextColor3 = self.Theme.Text
-    infoText.TextSize = 12
-    infoText.Font = Enum.Font.Gotham
-    infoText.TextYAlignment = Enum.TextYAlignment.Top
-    infoText.Parent = infoFrame
+    self.InfoText = Instance.new("TextLabel")
+    self.InfoText.Size = UDim2.new(0.9, 0, 0.9, 0)
+    self.InfoText.Position = UDim2.new(0.05, 0, 0.05, 0)
+    self.InfoText.BackgroundTransparency = 1
+    self.InfoText.Text = "Версия: " .. LightUILib.Version .. "\nВкладок: " .. #self.Tabs .. "\nАвтосохранение: ВКЛ"
+    self.InfoText.TextColor3 = self.Theme.Text
+    self.InfoText.TextSize = 12
+    self.InfoText.Font = Enum.Font.Gotham
+    self.InfoText.TextYAlignment = Enum.TextYAlignment.Top
+    self.InfoText.Parent = infoFrame
     
-    self.InfoText = infoText
+    -- Переключаемся на настройки по умолчанию
+    self:SwitchTab("⚙️ Настройки")
 end
 
-function Window:CreateConfigSection(tab)
+function Window:_CreateConfigSection(tab)
     local frame = Instance.new("Frame")
-    frame.Size = UDim2.new(1, 0, 0, 160)
+    frame.Size = UDim2.new(1, 0, 0, 180)
     frame.BackgroundColor3 = self.Theme.ItemBg
     frame.Parent = tab.Content
     CreateCorner(frame, 8)
     CreateStroke(frame, self.Theme.Border, 1)
     
-    -- Имя конфига
+    -- Поле имени
     local nameBox = Instance.new("TextBox")
     nameBox.Size = UDim2.new(0.9, 0, 0, 30)
     nameBox.Position = UDim2.new(0.05, 0, 0, 10)
@@ -424,11 +407,11 @@ function Window:CreateConfigSection(tab)
     
     -- Кнопки
     local btnY = 50
-    local btnWidth = 0.28
-    local spacing = 0.03
+    local btnW = 0.28
+    local sp = 0.03
     
     local saveBtn = Instance.new("TextButton")
-    saveBtn.Size = UDim2.new(btnWidth, 0, 0, 32)
+    saveBtn.Size = UDim2.new(btnW, 0, 0, 32)
     saveBtn.Position = UDim2.new(0.05, 0, 0, btnY)
     saveBtn.BackgroundColor3 = self.Theme.Success
     saveBtn.Text = "💾 Сохранить"
@@ -439,8 +422,8 @@ function Window:CreateConfigSection(tab)
     CreateCorner(saveBtn, 6)
     
     local loadBtn = Instance.new("TextButton")
-    loadBtn.Size = UDim2.new(btnWidth, 0, 0, 32)
-    loadBtn.Position = UDim2.new(0.05 + btnWidth + spacing, 0, 0, btnY)
+    loadBtn.Size = UDim2.new(btnW, 0, 0, 32)
+    loadBtn.Position = UDim2.new(0.05 + btnW + sp, 0, 0, btnY)
     loadBtn.BackgroundColor3 = self.Theme.Accent
     loadBtn.Text = "📂 Загрузить"
     loadBtn.TextColor3 = self.Theme.Text
@@ -450,8 +433,8 @@ function Window:CreateConfigSection(tab)
     CreateCorner(loadBtn, 6)
     
     local delBtn = Instance.new("TextButton")
-    delBtn.Size = UDim2.new(btnWidth, 0, 0, 32)
-    delBtn.Position = UDim2.new(0.05 + (btnWidth + spacing) * 2, 0, 0, btnY)
+    delBtn.Size = UDim2.new(btnW, 0, 0, 32)
+    delBtn.Position = UDim2.new(0.05 + (btnW + sp) * 2, 0, 0, btnY)
     delBtn.BackgroundColor3 = self.Theme.Close
     delBtn.Text = "🗑️ Удалить"
     delBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -473,19 +456,20 @@ function Window:CreateConfigSection(tab)
     
     -- Список конфигов
     local configList = Instance.new("TextLabel")
-    configList.Size = UDim2.new(0.9, 0, 0, 40)
+    configList.Size = UDim2.new(0.9, 0, 0, 60)
     configList.Position = UDim2.new(0.05, 0, 0, 115)
     configList.BackgroundTransparency = 1
-    configList.Text = "Конфиги: загрузка..."
+    configList.Text = "Загрузка..."
     configList.TextColor3 = self.Theme.TextDim
     configList.TextSize = 10
     configList.Font = Enum.Font.Gotham
     configList.TextYAlignment = Enum.TextYAlignment.Top
+    configList.TextWrapped = true
     configList.Parent = frame
     
-    local function updateConfigList()
+    local function updateList()
         local configs = self.Config:GetAllConfigs()
-        configList.Text = "Доступные: " .. table.concat(configs, ", ")
+        configList.Text = #configs > 0 and "Конфиги: " .. table.concat(configs, ", ") or "Нет сохранённых конфигов"
     end
     
     local function showStatus(text, isError)
@@ -498,7 +482,7 @@ function Window:CreateConfigSection(tab)
         self.Config.ConfigName = nameBox.Text
         if self.Config:Save(nameBox.Text) then
             showStatus("✅ Сохранено!")
-            updateConfigList()
+            updateList()
         else
             showStatus("❌ Ошибка", true)
         end
@@ -509,15 +493,15 @@ function Window:CreateConfigSection(tab)
         local data = self.Config:Load(nameBox.Text)
         if data then
             showStatus("✅ Загружено!")
-            self:RefreshAllElements()
             if data._tabs then
                 for _, tabName in ipairs(data._tabs) do
-                    if not self:GetTab(tabName) then
+                    if tabName ~= "⚙️ Настройки" and not self:GetTab(tabName) then
                         self:CreateTab(tabName)
                     end
                 end
             end
-            updateConfigList()
+            self:RefreshAllElements()
+            updateList()
         else
             showStatus("❌ Не найдено", true)
         end
@@ -526,21 +510,21 @@ function Window:CreateConfigSection(tab)
     delBtn.MouseButton1Click:Connect(function()
         self.Config:Delete(nameBox.Text)
         showStatus("🗑️ Удалено")
-        updateConfigList()
+        updateList()
     end)
     
-    updateConfigList()
+    updateList()
 end
 
-function Window:CreateTabManagerSection(tab)
+function Window:_CreateTabManagerSection(tab)
     local frame = Instance.new("Frame")
-    frame.Size = UDim2.new(1, 0, 0, 120)
+    frame.Size = UDim2.new(1, 0, 0, 140)
     frame.BackgroundColor3 = self.Theme.ItemBg
     frame.Parent = tab.Content
     CreateCorner(frame, 8)
     CreateStroke(frame, self.Theme.Border, 1)
     
-    -- Создание новой вкладки
+    -- Создание вкладки
     local newTabBox = Instance.new("TextBox")
     newTabBox.Size = UDim2.new(0.6, 0, 0, 30)
     newTabBox.Position = UDim2.new(0.05, 0, 0, 10)
@@ -564,9 +548,9 @@ function Window:CreateTabManagerSection(tab)
     createBtn.Parent = frame
     CreateCorner(createBtn, 6)
     
-    -- Список вкладок
+    -- Список вкладок для удаления
     local tabListFrame = Instance.new("ScrollingFrame")
-    tabListFrame.Size = UDim2.new(0.9, 0, 0, 70)
+    tabListFrame.Size = UDim2.new(0.9, 0, 0, 90)
     tabListFrame.Position = UDim2.new(0.05, 0, 0, 45)
     tabListFrame.BackgroundTransparency = 1
     tabListFrame.ScrollBarThickness = 4
@@ -582,13 +566,13 @@ function Window:CreateTabManagerSection(tab)
             if child:IsA("TextButton") then child:Destroy() end
         end
         
-        for _, tab in ipairs(self.Tabs) do
-            if tab.Name == "⚙️ Настройки" then continue end -- не показываем настройки
+        for _, t in ipairs(self.Tabs) do
+            if t.Name == "⚙️ Настройки" then continue end
             
             local btn = Instance.new("TextButton")
-            btn.Size = UDim2.new(1, 0, 0, 24)
+            btn.Size = UDim2.new(1, 0, 0, 26)
             btn.BackgroundColor3 = self.Theme.TabInactive
-            btn.Text = tab.Name .. " ❌"
+            btn.Text = t.Name .. " ❌"
             btn.TextColor3 = self.Theme.Text
             btn.TextSize = 11
             btn.Font = Enum.Font.Gotham
@@ -596,7 +580,7 @@ function Window:CreateTabManagerSection(tab)
             CreateCorner(btn, 4)
             
             btn.MouseButton1Click:Connect(function()
-                self:RemoveTab(tab.Name)
+                self:RemoveTab(t.Name)
                 updateTabList()
             end)
         end
@@ -616,102 +600,89 @@ function Window:CreateTabManagerSection(tab)
     self._updateTabList = updateTabList
 end
 
--- === УЛУЧШЕННОЕ УПРАВЛЕНИЕ ВКЛАДКАМИ ===
 
+-- УПРАВЛЕНИЕ ВКЛАДКАМИ
+-- УПРАВЛЕНИЕ ВКЛАДКАМИ
 function Window:CreateTab(name, layoutOrder)
-    -- Проверяем существование - ЗАМЕНЯЕМ старую вкладку
-    for i, existingTab in ipairs(self.Tabs) do
-        if existingTab.Name == name then
-            print("[YellowUI] Замена существующей вкладки:", name)
-            -- Сохраняем контент старой вкладки если нужно
-            existingTab.Button:Destroy()
-            existingTab.Content:Destroy()
+    -- Удаляем существующую с таким же именем
+    for i, existing in ipairs(self.Tabs) do
+        if existing.Name == name then
+            existing.Button:Destroy()
+            existing.Content:Destroy()
             table.remove(self.Tabs, i)
             break
         end
     end
     
-    local tab = {}
-    tab.Name = name
-    tab.Window = self
-    tab.Items = {}
+    local tab = {
+        Name = name,
+        Window = self,
+        Items = {}
+    }
     
     -- Кнопка вкладки
-    local btn = Instance.new("TextButton")
-    btn.Name = "Tab_" .. name
-    btn.Size = UDim2.new(1, 0, 0, 36)
-    btn.BackgroundColor3 = self.Theme.TabInactive
-    btn.Text = "  " .. name
-    btn.TextColor3 = self.Theme.TextDim
-    btn.TextSize = 13
-    btn.Font = Enum.Font.GothamBold
-    btn.TextXAlignment = Enum.TextXAlignment.Left
-    btn.LayoutOrder = layoutOrder or #self.Tabs + 1
-    btn.Parent = self.Sidebar
-    CreateCorner(btn, 8)
-    CreateStroke(btn, self.Theme.Border, 1)
+    tab.Button = Instance.new("TextButton")
+    tab.Button.Name = "Tab_" .. name
+    tab.Button.Size = UDim2.new(1, 0, 0, 36)
+    tab.Button.BackgroundColor3 = self.Theme.TabInactive
+    tab.Button.Text = "  " .. name
+    tab.Button.TextColor3 = self.Theme.TextDim
+    tab.Button.TextSize = 13
+    tab.Button.Font = Enum.Font.GothamBold
+    tab.Button.TextXAlignment = Enum.TextXAlignment.Left
+    tab.Button.LayoutOrder = layoutOrder or (#self.Tabs + 1) * 10
+    tab.Button.Parent = self.Sidebar
+    CreateCorner(tab.Button, 8)
+    CreateStroke(tab.Button, self.Theme.Border, 1)
     
     -- Контент вкладки
-    local content = Instance.new("ScrollingFrame")
-    content.Name = name
-    content.Size = UDim2.new(1, -10, 1, -10)
-    content.Position = UDim2.new(0, 5, 0, 5)
-    content.BackgroundTransparency = 1
-    content.Visible = false
-    content.ScrollBarThickness = 4
-    content.AutomaticCanvasSize = Enum.AutomaticSize.Y
-    content.Parent = self.Content
+    tab.Content = Instance.new("ScrollingFrame")
+    tab.Content.Name = name .. "_Content"
+    tab.Content.Size = UDim2.new(1, -10, 1, -10)
+    tab.Content.Position = UDim2.new(0, 5, 0, 5)
+    tab.Content.BackgroundTransparency = 1
+    tab.Content.Visible = false
+    tab.Content.ScrollBarThickness = 4
+    tab.Content.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    tab.Content.Parent = self.Content
     
     local listLayout = Instance.new("UIListLayout")
     listLayout.Padding = UDim.new(0, 8)
-    listLayout.Parent = content
+    listLayout.Parent = tab.Content
     
     local padding = Instance.new("UIPadding")
     padding.PaddingTop = UDim.new(0, 5)
     padding.PaddingBottom = UDim.new(0, 10)
     padding.PaddingLeft = UDim.new(0, 5)
     padding.PaddingRight = UDim.new(0, 5)
-    padding.Parent = content
-    
-    tab.Button = btn
-    tab.Content = content
+    padding.Parent = tab.Content
     
     -- Переключение
-    btn.MouseButton1Click:Connect(function()
+    tab.Button.MouseButton1Click:Connect(function()
         self:SwitchTab(name)
     end)
     
-    -- Hover эффекты
-    btn.MouseEnter:Connect(function()
+    -- Hover
+    tab.Button.MouseEnter:Connect(function()
         if self.CurrentTab ~= tab then
-            TweenService:Create(btn, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(255, 245, 120)}):Play()
+            TweenService:Create(tab.Button, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(255, 245, 120)}):Play()
         end
     end)
     
-    btn.MouseLeave:Connect(function()
+    tab.Button.MouseLeave:Connect(function()
         if self.CurrentTab ~= tab then
-            btn.BackgroundColor3 = self.Theme.TabInactive
+            tab.Button.BackgroundColor3 = self.Theme.TabInactive
         end
     end)
     
     table.insert(self.Tabs, tab)
     
-    -- Сортируем по LayoutOrder
+    -- Сортируем
     table.sort(self.Tabs, function(a, b) return a.Button.LayoutOrder < b.Button.LayoutOrder end)
-    
-    -- Авто-выбор если первая (не считая настроек)
-    local nonSettingsTabs = 0
-    for _, t in ipairs(self.Tabs) do
-        if t.Name ~= "⚙️ Настройки" then nonSettingsTabs = nonSettingsTabs + 1 end
-    end
-    
-    if nonSettingsTabs == 1 and name ~= "⚙️ Настройки" then
-        self:SwitchTab(name)
-    end
     
     -- Обновляем инфо
     if self.InfoText then
-        self.InfoText.Text = "Версия: " .. LightUILib.Version .. "\nВкладок: " .. #self.Tabs .. "\nАвтосохранение: ON\n"
+        self.InfoText.Text = "Версия: " .. LightUILib.Version .. "\nВкладок: " .. #self.Tabs .. "\nАвтосохранение: ВКЛ"
     end
     
     print("[YellowUI] Создана вкладка:", name)
@@ -732,18 +703,14 @@ function Window:RemoveTab(name)
             
             if self.CurrentTab == tab then
                 self.CurrentTab = nil
-                -- Переключаемся на первую доступную
-                for _, t in ipairs(self.Tabs) do
-                    if t.Name ~= "⚙️ Настройки" then
-                        self:SwitchTab(t.Name)
-                        break
-                    else
-                        self:SwitchTab("⚙️ Настройки")
-                    end
-                end
+                self:SwitchTab("⚙️ Настройки")
             end
             
-            self:ShowNotification("🗑️ Вкладка удалена: " .. name)
+            if self.InfoText then
+                self.InfoText.Text = "Версия: " .. LightUILib.Version .. "\nВкладок: " .. #self.Tabs .. "\nАвтосохранение: ВКЛ"
+            end
+            
+            self:ShowNotification("🗑️ Удалена: " .. name)
             return true
         end
     end
@@ -784,12 +751,11 @@ function Window:SwitchTab(name)
     end
 end
 
-function Window:OnTabSelect(tabName, callback)
-    self.TabCallbacks[tabName] = callback
+function Window:OnTabSelect(name, callback)
+    self.TabCallbacks[name] = callback
 end
 
--- === ЭЛЕМЕНТЫ UI ===
-
+-- ЭЛЕМЕНТЫ UI
 function Window:CreateSection(tab, text)
     local section = Instance.new("TextLabel")
     section.Size = UDim2.new(1, 0, 0, 28)
@@ -803,7 +769,7 @@ function Window:CreateSection(tab, text)
     return section
 end
 
-function Window:CreateToggle(tab, text, configKey, default)
+function Window:CreateToggle(tab, text, key, default)
     default = default or false
     
     local frame = Instance.new("Frame")
@@ -824,19 +790,15 @@ function Window:CreateToggle(tab, text, configKey, default)
     label.TextXAlignment = Enum.TextXAlignment.Left
     label.Parent = frame
     
-    -- Toggle
     local bg = Instance.new("Frame")
-    bg.Name = "ToggleBg"
     bg.Size = UDim2.new(0, 54, 0, 28)
     bg.Position = UDim2.new(1, -62, 0.5, -14)
     bg.BackgroundColor3 = self.Theme.ToggleOff
-    bg.BorderSizePixel = 0
     bg.Parent = frame
     CreateCorner(bg, 14)
     CreateStroke(bg, self.Theme.Border, 1)
     
     local knob = Instance.new("Frame")
-    knob.Name = "Knob"
     knob.Size = UDim2.new(0, 24, 0, 24)
     knob.Position = UDim2.new(0, 2, 0.5, -12)
     knob.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
@@ -844,45 +806,35 @@ function Window:CreateToggle(tab, text, configKey, default)
     CreateCorner(knob, 12)
     CreateStroke(knob, self.Theme.Border, 1)
     
-    -- Сохраняем ссылку
-    if not self.Elements[configKey] then self.Elements[configKey] = {} end
-    table.insert(self.Elements[configKey], {type = "toggle", bg = bg, knob = knob})
+    if not self.Elements[key] then self.Elements[key] = {} end
+    table.insert(self.Elements[key], {type = "toggle", bg = bg, knob = knob})
     
-    -- Устанавливаем значение
-    local value = self.Config:Get(configKey, default)
-    local function updateVisual(state)
+    local value = self.Config:Get(key, default)
+    local function update(state)
         bg.BackgroundColor3 = state and self.Theme.ToggleOn or self.Theme.ToggleOff
         knob.Position = state and UDim2.new(1, -26, 0.5, -12) or UDim2.new(0, 2, 0.5, -12)
     end
-    updateVisual(value)
+    update(value)
     
     local callback = nil
     
     frame.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            local newState = not self.Config:Get(configKey)
-            self.Config:Set(configKey, newState)
-            
-            TweenService:Create(bg, TweenInfo.new(0.2), {BackgroundColor3 = newState and self.Theme.ToggleOn or self.Theme.ToggleOff}):Play()
-            TweenService:Create(knob, TweenInfo.new(0.2), {
-                Position = newState and UDim2.new(1, -26, 0.5, -12) or UDim2.new(0, 2, 0.5, -12)
-            }):Play()
-            
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            local newState = not self.Config:Get(key)
+            self.Config:Set(key, newState)
+            update(newState)
             if callback then callback(newState) end
         end
     end)
     
     return {
         SetCallback = function(fn) callback = fn end,
-        SetValue = function(val)
-            self.Config:Set(configKey, val)
-            updateVisual(val)
-        end,
-        GetValue = function() return self.Config:Get(configKey) end
+        SetValue = function(val) self.Config:Set(key, val); update(val) end,
+        GetValue = function() return self.Config:Get(key) end
     }
 end
 
-function Window:CreateSlider(tab, text, configKey, min, max, decimals)
+function Window:CreateSlider(tab, text, key, min, max, decimals)
     min, max = min or 0, max or 100
     decimals = decimals or 0
     
@@ -897,27 +849,24 @@ function Window:CreateSlider(tab, text, configKey, min, max, decimals)
     label.Size = UDim2.new(1, -20, 0, 24)
     label.Position = UDim2.new(0, 10, 0, 5)
     label.BackgroundTransparency = 1
-    label.Text = text .. ": " .. tostring(self.Config:Get(configKey, min))
+    label.Text = text .. ": " .. tostring(self.Config:Get(key, min))
     label.TextColor3 = self.Theme.Text
     label.TextSize = 13
     label.Font = Enum.Font.GothamBold
     label.TextXAlignment = Enum.TextXAlignment.Left
     label.Parent = frame
     
-    -- Slider
     local sliderBg = Instance.new("Frame")
     sliderBg.Size = UDim2.new(1, -20, 0, 12)
     sliderBg.Position = UDim2.new(0, 10, 0, 38)
     sliderBg.BackgroundColor3 = Color3.fromRGB(220, 210, 150)
-    sliderBg.BorderSizePixel = 0
     sliderBg.Parent = frame
     CreateCorner(sliderBg, 6)
     
-    local sliderFill = Instance.new("Frame")
-    sliderFill.BackgroundColor3 = self.Theme.ToggleOn
-    sliderFill.BorderSizePixel = 0
-    sliderFill.Parent = sliderBg
-    CreateCorner(sliderFill, 6)
+    local fill = Instance.new("Frame")
+    fill.BackgroundColor3 = self.Theme.ToggleOn
+    fill.Parent = sliderBg
+    CreateCorner(fill, 6)
     
     local knob = Instance.new("Frame")
     knob.Size = UDim2.new(0, 18, 0, 18)
@@ -926,46 +875,44 @@ function Window:CreateSlider(tab, text, configKey, min, max, decimals)
     CreateCorner(knob, 9)
     CreateStroke(knob, self.Theme.Border, 1)
     
-    -- Сохраняем ссылку
-    if not self.Elements[configKey] then self.Elements[configKey] = {} end
-    table.insert(self.Elements[configKey], {type = "slider", label = label, fill = sliderFill, knob = knob, min = min, max = max})
+    if not self.Elements[key] then self.Elements[key] = {} end
+    table.insert(self.Elements[key], {type = "slider", label = label, fill = fill, knob = knob, min = min, max = max})
     
-    local function updateVisual(value)
-        local percent = math.clamp((value - min) / (max - min), 0, 1)
-        sliderFill.Size = UDim2.new(percent, 0, 1, 0)
-        knob.Position = UDim2.new(percent, -9, 0.5, -9)
-        label.Text = text .. ": " .. tostring(value)
+    local function updateVisual(val)
+        local pct = math.clamp((val - min) / (max - min), 0, 1)
+        fill.Size = UDim2.new(pct, 0, 1, 0)
+        knob.Position = UDim2.new(pct, -9, 0.5, -9)
+        label.Text = text .. ": " .. tostring(val)
     end
     
-    updateVisual(self.Config:Get(configKey, min))
+    updateVisual(self.Config:Get(key, min))
     
     local dragging = false
     local callback = nil
     
-    local function updateFromInput(input)
-        local pos = math.clamp((input.Position.X - sliderBg.AbsolutePosition.X) / sliderBg.AbsoluteSize.X, 0, 1)
-        local value = min + (max - min) * pos
+    local function update(input)
+        local pct = math.clamp((input.Position.X - sliderBg.AbsolutePosition.X) / sliderBg.AbsoluteSize.X, 0, 1)
+        local val = min + (max - min) * pct
         if decimals > 0 then
-            value = math.floor(value * (10 ^ decimals)) / (10 ^ decimals)
+            val = math.floor(val * (10 ^ decimals)) / (10 ^ decimals)
         else
-            value = math.floor(value)
+            val = math.floor(val)
         end
-        
-        self.Config:Set(configKey, value)
-        updateVisual(value)
-        if callback then callback(value) end
+        self.Config:Set(key, val)
+        updateVisual(val)
+        if callback then callback(val) end
     end
     
     sliderBg.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
             dragging = true
-            updateFromInput(input)
+            update(input)
         end
     end)
     
     UIS.InputChanged:Connect(function(input)
         if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
-            updateFromInput(input)
+            update(input)
         end
     end)
     
@@ -977,15 +924,39 @@ function Window:CreateSlider(tab, text, configKey, min, max, decimals)
     
     return {
         SetCallback = function(fn) callback = fn end,
-        SetValue = function(val)
-            self.Config:Set(configKey, math.clamp(val, min, max))
-            updateVisual(val)
-        end,
-        GetValue = function() return self.Config:Get(configKey) end
+        SetValue = function(val) self.Config:Set(key, math.clamp(val, min, max)); updateVisual(val) end,
+        GetValue = function() return self.Config:Get(key) end
     }
 end
 
-function Window:CreateInput(tab, text, configKey, isNumber, min, max)
+function Window:CreateButton(tab, text, callback)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, 0, 0, 40)
+    btn.BackgroundColor3 = self.Theme.Accent
+    btn.Text = text
+    btn.TextColor3 = self.Theme.Text
+    btn.TextSize = 14
+    btn.Font = Enum.Font.GothamBold
+    btn.Parent = tab.Content
+    CreateCorner(btn, 8)
+    CreateStroke(btn, self.Theme.Border, 1)
+    
+    btn.MouseEnter:Connect(function()
+        TweenService:Create(btn, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(255, 200, 50)}):Play()
+    end)
+    
+    btn.MouseLeave:Connect(function()
+        TweenService:Create(btn, TweenInfo.new(0.15), {BackgroundColor3 = self.Theme.Accent}):Play()
+    end)
+    
+    btn.MouseButton1Click:Connect(function()
+        if callback then callback() end
+    end)
+    
+    return btn
+end
+
+function Window:CreateInput(tab, text, key, isNumber, min, max)
     local frame = Instance.new("Frame")
     frame.Size = UDim2.new(1, 0, 0, 44)
     frame.BackgroundColor3 = self.Theme.ItemBg
@@ -1008,12 +979,10 @@ function Window:CreateInput(tab, text, configKey, isNumber, min, max)
     input.Size = UDim2.new(0, 100, 0, 32)
     input.Position = UDim2.new(1, -108, 0.5, -16)
     input.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-    input.Text = tostring(self.Config:Get(configKey, ""))
-    input.PlaceholderText = "..."
+    input.Text = tostring(self.Config:Get(key, ""))
     input.TextColor3 = self.Theme.Text
     input.TextSize = 13
     input.Font = Enum.Font.Gotham
-    input.ClearTextOnFocus = false
     input.Parent = frame
     CreateCorner(input, 6)
     CreateStroke(input, self.Theme.Border, 1)
@@ -1021,31 +990,31 @@ function Window:CreateInput(tab, text, configKey, isNumber, min, max)
     local callback = nil
     
     input.FocusLost:Connect(function()
-        local value = input.Text
+        local val = input.Text
         if isNumber then
-            local num = tonumber(value)
+            local num = tonumber(val)
             if num then
                 if min then num = math.max(num, min) end
                 if max then num = math.min(num, max) end
-                self.Config:Set(configKey, num)
+                self.Config:Set(key, num)
                 input.Text = tostring(num)
             else
-                input.Text = tostring(self.Config:Get(configKey, ""))
+                input.Text = tostring(self.Config:Get(key, ""))
             end
         else
-            self.Config:Set(configKey, value)
+            self.Config:Set(key, val)
         end
-        if callback then callback(self.Config:Get(configKey)) end
+        if callback then callback(self.Config:Get(key)) end
     end)
     
     return {
         SetCallback = function(fn) callback = fn end,
-        SetText = function(text) input.Text = tostring(text) end,
-        GetValue = function() return self.Config:Get(configKey) end
+        SetText = function(txt) input.Text = tostring(txt) end,
+        GetValue = function() return self.Config:Get(key) end
     }
 end
 
-function Window:CreateDropdown(tab, text, configKey, options)
+function Window:CreateDropdown(tab, text, key, options)
     local frame = Instance.new("Frame")
     frame.Size = UDim2.new(1, 0, 0, 44)
     frame.BackgroundColor3 = self.Theme.ItemBg
@@ -1068,7 +1037,7 @@ function Window:CreateDropdown(tab, text, configKey, options)
     btn.Size = UDim2.new(0, 140, 0, 32)
     btn.Position = UDim2.new(1, -148, 0.5, -16)
     btn.BackgroundColor3 = self.Theme.TabInactive
-    btn.Text = tostring(self.Config:Get(configKey, options[1] or "Select"))
+    btn.Text = tostring(self.Config:Get(key, options[1] or "Выбрать"))
     btn.TextColor3 = self.Theme.Text
     btn.TextSize = 13
     btn.Font = Enum.Font.GothamBold
@@ -1079,82 +1048,47 @@ function Window:CreateDropdown(tab, text, configKey, options)
     local callback = nil
     
     btn.MouseButton1Click:Connect(function()
-        local current = self.Config:Get(configKey, options[1])
-        local index = 1
+        local current = self.Config:Get(key, options[1])
+        local idx = 1
         for i, v in ipairs(options) do
-            if v == current then index = i; break end
+            if v == current then idx = i; break end
         end
-        local nextIndex = (index % #options) + 1
-        local newValue = options[nextIndex]
-        self.Config:Set(configKey, newValue)
-        btn.Text = newValue
-        if callback then callback(newValue) end
+        local nextIdx = (idx % #options) + 1
+        local newVal = options[nextIdx]
+        self.Config:Set(key, newVal)
+        btn.Text = newVal
+        if callback then callback(newVal) end
     end)
     
     return {
         SetCallback = function(fn) callback = fn end,
-        SetValue = function(val)
-            self.Config:Set(configKey, val)
-            btn.Text = tostring(val)
-        end,
-        GetValue = function() return self.Config:Get(configKey) end
+        SetValue = function(val) self.Config:Set(key, val); btn.Text = tostring(val) end,
+        GetValue = function() return self.Config:Get(key) end
     }
 end
 
-function Window:CreateButton(tab, text, callback)
-    local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(1, 0, 0, 40)
-    btn.BackgroundColor3 = self.Theme.Accent
-    btn.Text = text
-    btn.TextColor3 = self.Theme.Text
-    btn.TextSize = 14
-    btn.Font = Enum.Font.GothamBold
-    btn.Parent = tab.Content
-    CreateCorner(btn, 8)
-    CreateStroke(btn, self.Theme.Border, 1)
-    
-    -- Hover
-    btn.MouseEnter:Connect(function()
-        TweenService:Create(btn, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(255, 200, 50)}):Play()
-    end)
-    
-    btn.MouseLeave:Connect(function()
-        TweenService:Create(btn, TweenInfo.new(0.15), {BackgroundColor3 = self.Theme.Accent}):Play()
-    end)
-    
-    btn.MouseButton1Click:Connect(function()
-        if callback then callback() end
-    end)
-    
-    return btn
-end
-
--- === ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ ===
-
+-- ВСПОМОГАТЕЛЬНЫЕ
 function Window:RefreshAllElements()
-    for key, elements in pairs(self.Elements) do
-        local value = self.Config:Get(key)
-        for _, elem in ipairs(elements) do
+    for key, elems in pairs(self.Elements) do
+        local val = self.Config:Get(key)
+        for _, elem in ipairs(elems) do
             if elem.type == "toggle" then
-                elem.bg.BackgroundColor3 = value and self.Theme.ToggleOn or self.Theme.ToggleOff
-                elem.knob.Position = value and UDim2.new(1, -26, 0.5, -12) or UDim2.new(0, 2, 0.5, -12)
+                elem.bg.BackgroundColor3 = val and self.Theme.ToggleOn or self.Theme.ToggleOff
+                elem.knob.Position = val and UDim2.new(1, -26, 0.5, -12) or UDim2.new(0, 2, 0.5, -12)
             elseif elem.type == "slider" then
-                local percent = math.clamp((value - elem.min) / (elem.max - elem.min), 0, 1)
-                elem.fill.Size = UDim2.new(percent, 0, 1, 0)
-                elem.knob.Position = UDim2.new(percent, -9, 0.5, -9)
-                elem.label.Text = elem.label.Text:gsub(": .*", ": " .. tostring(value))
+                local pct = math.clamp((val - elem.min) / (elem.max - elem.min), 0, 1)
+                elem.fill.Size = UDim2.new(pct, 0, 1, 0)
+                elem.knob.Position = UDim2.new(pct, -9, 0.5, -9)
             end
         end
     end
 end
 
-function Window:ShowNotification(text, duration)
-    duration = duration or 2
-    
+function Window:ShowNotification(text, isError)
     local notif = Instance.new("TextLabel")
-    notif.Size = UDim2.new(0, 250, 0, 45)
-    notif.Position = UDim2.new(0.5, -125, 0, -60)
-    notif.BackgroundColor3 = self.Theme.TabActive
+    notif.Size = UDim2.new(0, 280, 0, 50)
+    notif.Position = UDim2.new(0.5, -140, 0, -70)
+    notif.BackgroundColor3 = isError and self.Theme.Error or self.Theme.TabActive
     notif.Text = text
     notif.TextColor3 = self.Theme.Text
     notif.TextSize = 14
@@ -1163,11 +1097,10 @@ function Window:ShowNotification(text, duration)
     CreateCorner(notif, 10)
     CreateStroke(notif, self.Theme.Border, 2)
     
-    -- Анимация появления
-    TweenService:Create(notif, TweenInfo.new(0.3, Enum.EasingStyle.Back), {Position = UDim2.new(0.5, -125, 0, 15)}):Play()
+    TweenService:Create(notif, TweenInfo.new(0.3, Enum.EasingStyle.Back), {Position = UDim2.new(0.5, -140, 0, 20)}):Play()
     
-    task.delay(duration, function()
-        TweenService:Create(notif, TweenInfo.new(0.3), {Position = UDim2.new(0.5, -125, 0, -60)}):Play()
+    task.delay(2.5, function()
+        TweenService:Create(notif, TweenInfo.new(0.3), {Position = UDim2.new(0.5, -140, 0, -70)}):Play()
         task.wait(0.3)
         notif:Destroy()
     end)
@@ -1188,29 +1121,27 @@ function Window:Minimize()
     self.MinFrame.Size = UDim2.new(0, 160, 0, 50)
     self.MinFrame.Position = UDim2.new(0, 20, 0, 20)
     self.MinFrame.BackgroundColor3 = self.Theme.TitleBar
-    self.MinFrame.BorderSizePixel = 0
     self.MinFrame.Parent = self.ScreenGui
     CreateCorner(self.MinFrame, 12)
     CreateStroke(self.MinFrame, self.Theme.Border, 2)
     
-    local minText = Instance.new("TextLabel")
-    minText.Size = UDim2.new(1, 0, 1, 0)
-    minText.BackgroundTransparency = 1
-    minText.Text = "🟡 YellowUI"
-    minText.TextColor3 = self.Theme.Text
-    minText.TextSize = 16
-    minText.Font = Enum.Font.GothamBold
-    minText.Parent = self.MinFrame
+    local txt = Instance.new("TextLabel")
+    txt.Size = UDim2.new(1, 0, 1, 0)
+    txt.BackgroundTransparency = 1
+    txt.Text = "🟡 Меню"
+    txt.TextColor3 = self.Theme.Text
+    txt.TextSize = 16
+    txt.Font = Enum.Font.GothamBold
+    txt.Parent = self.MinFrame
     
-    local restoreBtn = Instance.new("TextButton")
-    restoreBtn.Size = UDim2.new(1, 0, 1, 0)
-    restoreBtn.BackgroundTransparency = 1
-    restoreBtn.Text = ""
-    restoreBtn.Parent = self.MinFrame
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, 0, 1, 0)
+    btn.BackgroundTransparency = 1
+    btn.Parent = self.MinFrame
     
     MakeDraggable(self.MinFrame)
     
-    restoreBtn.MouseButton1Click:Connect(function()
+    btn.MouseButton1Click:Connect(function()
         self.Minimized = false
         self.Frame.Visible = true
         self.MinFrame:Destroy()
@@ -1226,12 +1157,10 @@ function Window:Destroy()
     if self.MinFrame then self.MinFrame:Destroy() end
 end
 
--- === ОСНОВНАЯ ФУНКЦИЯ ===
-
-function LightUILib:CreateWindow(title, size, options)
-    return Window.new(title, size, options)
+-- ЭКСПОРТ
+function LightUILib:CreateWindow(title, size)
+    return Window.new(title, size)
 end
 
 getgenv().YellowUI = LightUILib
-
 return LightUILib
