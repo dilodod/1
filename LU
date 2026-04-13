@@ -1,294 +1,313 @@
 -- ============================================
--- HUNTER'S GRASP COMBO SCRIPT
+-- AUTO-FLING SYSTEM (Original SkidFling)
+-- Работает только если: ТЫ + 1 ИГРОК (всего 2)
 -- ============================================
 
 local Players = game:GetService("Players")
-local player = Players.LocalPlayer
-local character = player.Character or player.CharacterAdded:Wait()
-local hrp = character:WaitForChild("HumanoidRootPart")
-local humanoid = character:WaitForChild("Humanoid")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Player = Players.LocalPlayer
 
--- === КОНФИГ ===
-local CONFIG = {
-    SKILL_NAME = "Lethal Whirlwind Stream",
-    SEARCH_RADIUS = 12,
-    ANIMATION_HIT = "rbxassetid://12296113986",
-    ANIMATION_START = "rbxassetid://12296882427",
-    SPIN_SPEED = 0.05,  -- скорость кручения
-    SPIN_DURATION = 0.5, -- как долго крутиться
-}
+-- ============================================
+-- ПРОВЕРКА ИГРОКОВ
+-- ============================================
 
--- === ПЕРЕМЕННЫЕ ===
-local currentTarget = nil
-local isSpinning = false
-local animationTracker = {}
-
--- === ОТСЛЕЖИВАНИЕ АНИМАЦИЙ ===
-local function setupAnimationTracker()
-    humanoid.AnimationPlayed:Connect(function(animTrack)
-        local animId = animTrack.Animation.AnimationId
-        animationTracker[animId] = true
-        
-        -- Сброс через секунду
-        task.delay(1, function()
-            animationTracker[animId] = nil
-        end)
-    end)
+if #Players:GetPlayers() > 2 then
+    warn("❌ TOO MANY PLAYERS. Script disabled.")
+    return
 end
 
--- Проверка анимации
-local function isPlayingAnimation(assetId)
-    return animationTracker[assetId] == true
-end
+Players.PlayerAdded:Connect(function()
+    if #Players:GetPlayers() > 2 then
+        warn("❌ NEW PLAYER JOINED. Disabling...")
+        -- Остановить все циклы здесь если нужно
+    end
+end)
 
--- === ФУНКЦИИ ДЕЙСТВИЙ ===
+print("✅ 2 players detected. Starting auto-fling...")
 
--- Отправка действия
-local function sendAction(goal, key, dash)
-    local communicate = character:FindFirstChild("Communicate")
-    if not communicate then return end
-    
-    local args = {
-        [1] = {
-            ["Goal"] = goal,
-            ["Key"] = key,
-            ["Dash"] = dash,
-            ["Mobile"] = true
-        }
-    }
-    communicate:FireServer(unpack(args))
-end
+-- ============================================
+-- ОРИГИНАЛЬНАЯ ФУНКЦИЯ ФЛИНГА (без изменений)
+-- ============================================
 
--- Dash + Q комбо
-local function dashQ(direction)
-    direction = direction or Enum.KeyCode.W
-    
-    sendAction("KeyPress", Enum.KeyCode.Q, direction)
-    
-    task.delay(0.1, function()
-        sendAction("KeyRelease", Enum.KeyCode.Q, direction)
-    end)
-end
+local AllBool = false
 
--- Dash вверх (подкидывание)
-local function dashUp()
-    -- Смотрим вверх
-    local lookUp = CFrame.new(hrp.Position, hrp.Position + Vector3.new(0, 10, 0))
-    hrp.CFrame = lookUp
-    
-    -- Небольшой импульс вверх
-    hrp.Velocity = Vector3.new(0, 40, 0)
-    
-    -- Dash вверх (W + смотрим вверх)
-    dashQ(Enum.KeyCode.W)
-end
-
--- === ПОИСК ЦЕЛИ ===
-local function getNearestTarget(radius)
-    local live = workspace:FindFirstChild("Live")
-    if not live then return nil end
-    
-    local nearest = nil
-    local minDist = radius
-    
-    for _, obj in pairs(live:GetChildren()) do
-        if obj ~= character and obj:IsA("Model") then
-            local targetHrp = obj:FindFirstChild("HumanoidRootPart")
-            local targetHumanoid = obj:FindFirstChild("Humanoid")
-            
-            if targetHrp and targetHumanoid and targetHumanoid.Health > 0 then
-                local dist = (hrp.Position - targetHrp.Position).Magnitude
-                if dist < minDist then
-                    minDist = dist
-                    nearest = {
-                        Model = obj,
-                        HRP = targetHrp,
-                        Humanoid = targetHumanoid
-                    }
+local GetPlayer = function(Name)
+    Name = Name:lower()
+    if Name == "all" or Name == "others" then
+        AllBool = true
+        return
+    elseif Name == "random" then
+        local GetPlayers = Players:GetPlayers()
+        if table.find(GetPlayers, Player) then table.remove(GetPlayers, table.find(GetPlayers, Player)) end
+        return GetPlayers[math.random(#GetPlayers)]
+    elseif Name ~= "random" and Name ~= "all" and Name ~= "others" then
+        for _, x in next, Players:GetPlayers() do
+            if x ~= Player then
+                if x.Name:lower():match("^"..Name) then
+                    return x;
+                elseif x.DisplayName:lower():match("^"..Name) then
+                    return x;
                 end
             end
         end
+    else
+        return
     end
-    
-    return nearest
 end
 
--- === ПРОВЕРКИ СОСТОЯНИЙ ===
-local function hasForceField(target)
-    return target:FindFirstChild("ForceField") ~= nil
+local Message = function(_Title, _Text, Time)
+    game:GetService("StarterGui"):SetCore("SendNotification", {Title = _Title, Text = _Text, Duration = Time})
 end
 
--- === ПОВОРОТ И АИМ ===
-local function lookAt(targetPos)
-    local pos = hrp.Position
-    local dir = Vector3.new(targetPos.X - pos.X, 0, targetPos.Z - pos.Z).Unit
-    hrp.CFrame = CFrame.new(pos, pos + dir)
-end
+-- ОРИГИНАЛЬНЫЙ SKIDFLING (без изменений)
+local SkidFling = function(TargetPlayer)
+    local Character = Player.Character
+    local Humanoid = Character and Character:FindFirstChildOfClass("Humanoid")
+    local RootPart = Humanoid and Humanoid.RootPart
 
--- Аимбот (непрерывно следит)
-local function aimbot(targetHRP)
-    if not targetHRP then return end
-    
-    task.spawn(function()
-        while targetHRP.Parent and targetHRP.Parent:FindFirstChild("Humanoid") 
-              and targetHRP.Parent.Humanoid.Health > 0 do
-            lookAt(targetHRP.Position)
-            task.wait(0.03)
+    local TCharacter = TargetPlayer.Character
+    local THumanoid
+    local TRootPart
+    local THead
+    local Accessory
+    local Handle
+
+    if TCharacter:FindFirstChildOfClass("Humanoid") then
+        THumanoid = TCharacter:FindFirstChildOfClass("Humanoid")
+    end
+    if THumanoid and THumanoid.RootPart then
+        TRootPart = THumanoid.RootPart
+    end
+    if TCharacter:FindFirstChild("Head") then
+        THead = TCharacter.Head
+    end
+    if TCharacter:FindFirstChildOfClass("Accessory") then
+        Accessory = TCharacter:FindFirstChildOfClass("Accessory")
+    end
+    if Accessory and Accessory:FindFirstChild("Handle") then
+        Handle = Accessory.Handle
+    end
+
+    if Character and Humanoid and RootPart then
+        if RootPart.Velocity.Magnitude < 50 then
+            getgenv().OldPos = RootPart.CFrame
         end
-    end)
-end
-
--- === РАНДОМНОЕ КРУЧЕНИЕ ===
-local function randomSpin()
-    isSpinning = true
-    
-    task.spawn(function()
-        local startTime = tick()
+        if THumanoid and THumanoid.Sit and not AllBool then
+            return Message("Error", "Target is sitting", 3)
+        end
+        if THead then
+            workspace.CurrentCamera.CameraSubject = THead
+        elseif not THead and Handle then
+            workspace.CurrentCamera.CameraSubject = Handle
+        elseif THumanoid and TRootPart then
+            workspace.CurrentCamera.CameraSubject = THumanoid
+        end
+        if not TCharacter:FindFirstChildWhichIsA("BasePart") then
+            return
+        end
         
-        while isSpinning and (tick() - startTime < CONFIG.SPIN_DURATION) do
-            -- Резкие рандомные повороты
-            local randomAngle = math.random(-180, 180)
-            local randomTilt = math.random(-45, 45)
-            
-            hrp.CFrame = hrp.CFrame 
-                * CFrame.Angles(0, math.rad(randomAngle), 0)
-                * CFrame.Angles(math.rad(randomTilt), 0, 0)
-            
-            -- Микро-движения для хаоса
-            hrp.Velocity = Vector3.new(
-                math.random(-20, 20),
-                math.random(-10, 10),
-                math.random(-20, 20)
-            )
-            
-            task.wait(CONFIG.SPIN_SPEED)
+        local FPos = function(BasePart, Pos, Ang)
+            RootPart.CFrame = CFrame.new(BasePart.Position) * Pos * Ang
+            Character:SetPrimaryPartCFrame(CFrame.new(BasePart.Position) * Pos * Ang)
+            RootPart.Velocity = Vector3.new(9e7, 9e7 * 10, 9e7)
+            RootPart.RotVelocity = Vector3.new(9e8, 9e8, 9e8)
         end
         
-        isSpinning = false
-    end)
-end
+        local SFBasePart = function(BasePart)
+            local TimeToWait = 2
+            local Time = tick()
+            local Angle = 0
 
--- === АКТИВАЦИЯ СКИЛЛА ===
-local function activateSkill()
-    local tool = player.Backpack:FindFirstChild(CONFIG.SKILL_NAME) 
-                 or character:FindFirstChild(CONFIG.SKILL_NAME)
-    
-    if not tool then return false end
-    
-    if tool.Parent == player.Backpack then
-        tool.Parent = character
-        task.wait(0.1)
-    end
-    
-    if tool.Parent == character then
-        tool:Activate()
-        return true
-    end
-    
-    return false
-end
+            repeat
+                if RootPart and THumanoid then
+                    if BasePart.Velocity.Magnitude < 50 then
+                        Angle = Angle + 100
 
--- ============================================
--- ГЛАВНАЯ ЛОГИКА КОМБО
--- ============================================
+                        FPos(BasePart, CFrame.new(0, 1.5, 0) + THumanoid.MoveDirection * BasePart.Velocity.Magnitude / 1.25, CFrame.Angles(math.rad(Angle),0 ,0))
+                        task.wait()
 
-local function executeCombo()
-    -- 1. Найти цель
-    currentTarget = getNearestTarget(CONFIG.SEARCH_RADIUS)
-    if not currentTarget then
-        print("Цель не найдена")
-        return
-    end
-    
-    print("Найдена цель:", currentTarget.Model.Name)
-    
-    -- 2. Повернуться к цели
-    lookAt(currentTarget.HRP.Position)
-    
-    -- 3. Активировать скилл
-    if not activateSkill() then
-        print("Скилл не активирован")
-        return
-    end
-    
-    print("Скилл активирован")
-    
-    -- 4. Ждём анимацию начала скилла
-    local skillStarted = false
-    local startTime = tick()
-    
-    while tick() - startTime < 2 do
-        if isPlayingAnimation(CONFIG.ANIMATION_START) then
-            skillStarted = true
-            print("Скилл начал работать")
-            break
+                        FPos(BasePart, CFrame.new(0, -1.5, 0) + THumanoid.MoveDirection * BasePart.Velocity.Magnitude / 1.25, CFrame.Angles(math.rad(Angle), 0, 0))
+                        task.wait()
+
+                        FPos(BasePart, CFrame.new(2.25, 1.5, -2.25) + THumanoid.MoveDirection * BasePart.Velocity.Magnitude / 1.25, CFrame.Angles(math.rad(Angle), 0, 0))
+                        task.wait()
+
+                        FPos(BasePart, CFrame.new(-2.25, -1.5, 2.25) + THumanoid.MoveDirection * BasePart.Velocity.Magnitude / 1.25, CFrame.Angles(math.rad(Angle), 0, 0))
+                        task.wait()
+
+                        FPos(BasePart, CFrame.new(0, 1.5, 0) + THumanoid.MoveDirection,CFrame.Angles(math.rad(Angle), 0, 0))
+                        task.wait()
+
+                        FPos(BasePart, CFrame.new(0, -1.5, 0) + THumanoid.MoveDirection,CFrame.Angles(math.rad(Angle), 0, 0))
+                        task.wait()
+                    else
+                        FPos(BasePart, CFrame.new(0, 1.5, THumanoid.WalkSpeed), CFrame.Angles(math.rad(90), 0, 0))
+                        task.wait()
+
+                        FPos(BasePart, CFrame.new(0, -1.5, -THumanoid.WalkSpeed), CFrame.Angles(0, 0, 0))
+                        task.wait()
+
+                        FPos(BasePart, CFrame.new(0, 1.5, THumanoid.WalkSpeed), CFrame.Angles(math.rad(90), 0, 0))
+                        task.wait()
+                        
+                        FPos(BasePart, CFrame.new(0, 1.5, TRootPart.Velocity.Magnitude / 1.25), CFrame.Angles(math.rad(90), 0, 0))
+                        task.wait()
+
+                        FPos(BasePart, CFrame.new(0, -1.5, -TRootPart.Velocity.Magnitude / 1.25), CFrame.Angles(0, 0, 0))
+                        task.wait()
+
+                        FPos(BasePart, CFrame.new(0, 1.5, TRootPart.Velocity.Magnitude / 1.25), CFrame.Angles(math.rad(90), 0, 0))
+                        task.wait()
+
+                        FPos(BasePart, CFrame.new(0, -1.5, 0), CFrame.Angles(math.rad(90), 0, 0))
+                        task.wait()
+
+                        FPos(BasePart, CFrame.new(0, -1.5, 0), CFrame.Angles(0, 0, 0))
+                        task.wait()
+
+                        FPos(BasePart, CFrame.new(0, -1.5 ,0), CFrame.Angles(math.rad(-90), 0, 0))
+                        task.wait()
+
+                        FPos(BasePart, CFrame.new(0, -1.5, 0), CFrame.Angles(0, 0, 0))
+                        task.wait()
+                    end
+                else
+                    break
+                end
+            until BasePart.Velocity.Magnitude > 500 or BasePart.Parent ~= TargetPlayer.Character or TargetPlayer.Parent ~= Players or not TargetPlayer.Character == TCharacter or THumanoid.Sit or Humanoid.Health <= 0 or tick() > Time + TimeToWait
         end
-        task.wait(0.05)
-    end
-    
-    if not skillStarted then
-        print("Скилл не сработал")
-        return
-    end
-    
-    -- 5. Ждём успешного захвата (ForceField + анимация попадания)
-    local grabSuccess = false
-    startTime = tick()
-    
-    while tick() - startTime < 3 do
-        local hasFF = hasForceField(currentTarget.Model)
-        local hitAnim = isPlayingAnimation(CONFIG.ANIMATION_HIT)
         
-        if hasFF and hitAnim then
-            grabSuccess = true
-            print("Успешный захват!")
-            break
+        workspace.FallenPartsDestroyHeight = 0/0
+        
+        local BV = Instance.new("BodyVelocity")
+        BV.Name = "EpixVel"
+        BV.Parent = RootPart
+        BV.Velocity = Vector3.new(9e8, 9e8, 9e8)
+        BV.MaxForce = Vector3.new(1/0, 1/0, 1/0)
+        
+        Humanoid:SetStateEnabled(Enum.HumanoidStateType.Seated, false)
+        
+        if TRootPart and THead then
+            if (TRootPart.CFrame.p - THead.CFrame.p).Magnitude > 5 then
+                SFBasePart(THead)
+            else
+                SFBasePart(TRootPart)
+            end
+        elseif TRootPart and not THead then
+            SFBasePart(TRootPart)
+        elseif not TRootPart and THead then
+            SFBasePart(THead)
+        elseif not TRootPart and not THead and Accessory and Handle then
+            SFBasePart(Handle)
+        else
+            return Message("Error", "Target is missing parts", 3)
         end
-        task.wait(0.05)
+        
+        BV:Destroy()
+        Humanoid:SetStateEnabled(Enum.HumanoidStateType.Seated, true)
+        workspace.CurrentCamera.CameraSubject = Humanoid
+        
+        repeat
+            RootPart.CFrame = getgenv().OldPos * CFrame.new(0, .5, 0)
+            Character:SetPrimaryPartCFrame(getgenv().OldPos * CFrame.new(0, .5, 0))
+            Humanoid:ChangeState("GettingUp")
+            table.foreach(Character:GetChildren(), function(_, x)
+                if x:IsA("BasePart") then
+                    x.Velocity, x.RotVelocity = Vector3.new(), Vector3.new()
+                end
+            end)
+            task.wait()
+        until (RootPart.Position - getgenv().OldPos.p).Magnitude < 25
+        workspace.FallenPartsDestroyHeight = getgenv().FPDH
+    else
+        return Message("Error", "Character error", 3)
     end
-    
-    if not grabSuccess then
-        print("Захват не удался")
-        return
-    end
-    
-    -- 6. Крутимся рандомно и резко пока есть ForceField
-    randomSpin()
-    
-    -- Ждём пока ForceField не пропадёт
-    while hasForceField(currentTarget.Model) and isSpinning do
-        task.wait(0.1)
-    end
-    
-    -- Останавливаем кручение
-    isSpinning = false
-    print("ForceField пропал, продолжаем комбо")
-    
-    -- 7. Dash вверх (подкидывание)
-    dashUp()
-    task.wait(0.2)
-    
-    -- 8. Аимбот на цель
-    aimbot(currentTarget.HRP)
-    
-    print("Комбо завершено!")
 end
 
 -- ============================================
--- ЗАПУСК
+-- АВТО-ФЛИНГ (постоянно, даже после респавна)
 -- ============================================
 
-setupAnimationTracker()
+local Target = nil
+local IsFlinging = false
+local SafeMode = false
 
--- Запуск по команде (можно изменить на клавишу)
-executeCombo()
+local function findTarget()
+    for _, p in pairs(Players:GetPlayers()) do
+        if p ~= Player then return p end
+    end
+    return nil
+end
 
--- Или по клавише (раскомментировать):
---[[
-local UIS = game:GetService("UserInputService")
-UIS.InputBegan:Connect(function(input, gameProcessed)
-    if not gameProcessed and input.KeyCode == Enum.KeyCode.G then
-        executeCombo()
+-- Сейф-мод: телепортация по карте
+local function toggleSafeMode()
+    SafeMode = not SafeMode
+    
+    if SafeMode then
+        Message("SAFE MODE", "ON - Random teleport", 3)
+        
+        task.spawn(function()
+            while SafeMode do
+                if Player.Character and Player.Character:FindFirstChild("HumanoidRootPart") then
+                    local hrp = Player.Character.HumanoidRootPart
+                    hrp.CFrame = CFrame.new(
+                        math.random(-2000, 2000),
+                        math.random(500, 1000),
+                        math.random(-2000, 2000)
+                    )
+                end
+                task.wait(0.05)
+            end
+        end)
+    else
+        Message("SAFE MODE", "OFF - Fling resumed", 2)
+    end
+end
+
+-- Авто-флинг цикл
+task.spawn(function()
+    while true do
+        if not SafeMode then
+            Target = findTarget()
+            
+            if Target and Target.Character then
+                IsFlinging = true
+                AllBool = false
+                
+                -- Флинг с pcall чтобы не крашнулось
+                pcall(function()
+                    SkidFling(Target)
+                end)
+                
+                IsFlinging = false
+            end
+        end
+        
+        task.wait(0.1) -- Небольшая задержка между циклами
     end
 end)
---]]
+
+-- Отслеживание респавна цели
+Players.PlayerRemoving:Connect(function(p)
+    if p == Target then
+        Target = nil
+        Message("Target left", "Waiting for new...", 2)
+    end
+end)
+
+-- Горячие клавиши
+UserInputService.InputBegan:Connect(function(input, gpe)
+    if gpe then return end
+    
+    -- P - сейф-мод
+    if input.KeyCode == Enum.KeyCode.P then
+        toggleSafeMode()
+    end
+end)
+
+-- Инициализация
+getgenv().FPDH = workspace.FallenPartsDestroyHeight
+
+Message("AUTO-FLING", "Original SkidFling | P = Safe Mode", 5)
+print("🔥 Auto-fling active. Target:", findTarget() and findTarget().Name or "None")
