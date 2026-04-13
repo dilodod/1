@@ -2,7 +2,6 @@
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
-local VirtualInputManager = game:GetService("VirtualInputManager")
 
 local localPlayer = Players.LocalPlayer
 
@@ -19,6 +18,9 @@ local COOLDOWN = 20
 local RISE_HEIGHT = 7.5
 local RISE_DURATION = 2
 local SPIN_SPEED = 80
+local AIMBOT_DELAY = 0.2  -- 0.2 сек после Dash
+local AIMBOT_DURATION = 0.3 -- 0.3 сек аимбота
+
 local ANIM_SKILL_START = "rbxassetid://12296882427"
 
 -- Цвета
@@ -27,7 +29,7 @@ local COLOR_READY = Color3.fromRGB(100, 255, 100)
 local COLOR_ANIMATION = Color3.fromRGB(0, 150, 255)
 local COLOR_FORCEFIELD = Color3.fromRGB(150, 0, 255)
 local COLOR_CASTING = Color3.fromRGB(255, 200, 0)
-local COLOR_DASH = Color3.fromRGB(255, 100, 0)
+local COLOR_AIMBOT = Color3.fromRGB(255, 50, 50) -- Красный для аимбота
 
 -- === СОСТОЯНИЯ ===
 local currentTarget = nil
@@ -36,6 +38,7 @@ local skillUsed = false
 local hasForceField = false
 local dashPending = false
 local isSpinning = false
+local isAiming = false
 
 -- === GUI ===
 local statusGui = Instance.new("ScreenGui")
@@ -85,17 +88,6 @@ local function setColor(color, text)
     statusTextLabel.Text = text
 end
 
--- === СКАНЕР (для отладки) ===
-task.delay(3, function()
-    print("=== SCANNING ===")
-    for _, v in pairs(character:GetDescendants()) do
-        if v:IsA("RemoteEvent") then
-            print("Found RemoteEvent:", v.Name)
-        end
-    end
-    print("===============")
-end)
-
 -- === ПОИСК ЦЕЛИ ===
 local function getNearestTarget()
     local live = Workspace:FindFirstChild(LIVE_FOLDER)
@@ -128,29 +120,70 @@ local function checkForceField()
     return currentTarget.Model:FindFirstChild("ForceField") ~= nil
 end
 
--- === МЕГА ВЕРТУШКА ===
+-- === АИМБОТ ===
+local function startAimbot()
+    if not currentTarget or not currentTarget.HRP then return end
+    if isAiming then return end
+    
+    isAiming = true
+    print("🎯 AIMBOT START")
+    setColor(COLOR_AIMBOT, "AIMBOT")
+    
+    local startTime = tick()
+    
+    while isAiming do
+        if tick() - startTime > AIMBOT_DURATION then
+            isAiming = false
+            break
+        end
+        
+        if not currentTarget or not currentTarget.HRP then
+            isAiming = false
+            break
+        end
+        
+        local targetPos = currentTarget.HRP.Position
+        local myPos = hrp.Position
+        local dir = Vector3.new(targetPos.X - myPos.X, 0, targetPos.Z - myPos.Z).Unit
+        
+        hrp.CFrame = CFrame.new(myPos, myPos + dir)
+        
+        RunService.Heartbeat:Wait()
+    end
+    
+    print("🎯 AIMBOT END")
+    setColor(COLOR_READY, "READY")
+end
+
+-- === МЕГА ВЕРТУШКА (пока есть ForceField) ===
 local function megaSpinLoop()
     if isSpinning then return end
     isSpinning = true
     
-    print("🌪️ SPIN START")
+    print("🌪️ MEGA SPIN START!")
     setColor(COLOR_FORCEFIELD, "SPIN!")
     
     local startTime = tick()
     local startY = hrp.Position.Y
     
     while isSpinning do
+        -- Проверяем ForceField
         if not checkForceField() then
-            print("⚠️ FF lost — stop spin")
+            print("⚠️ ForceField lost — spin stopped")
             isSpinning = false
             break
         end
         
         local elapsed = tick() - startTime
+        
+        -- Подъем 7.5 стадов за 2 секунды
         local progress = math.min(elapsed / RISE_DURATION, 1)
         local newY = startY + (RISE_HEIGHT * progress)
+        
+        -- Супер кручение
         local spinAngle = elapsed * SPIN_SPEED
         
+        -- Ориентация на цель
         local targetDir = Vector3.new(0, 0, 1)
         if currentTarget and currentTarget.HRP then
             local targetPos = currentTarget.HRP.Position
@@ -168,59 +201,45 @@ local function megaSpinLoop()
         RunService.Heartbeat:Wait()
     end
     
-    print("🌪️ SPIN END")
+    print("🌪️ MEGA SPIN ENDED")
 end
 
--- === DASH+Q ИСПРАВЛЕННЫЙ ===
+-- === DASH+Q (ничего не делаем, только ивент + аимбот через 0.2с) ===
 local function triggerDashQ()
-    print("⚡ DASH+Q TRIGGER")
-    setColor(COLOR_DASH, "DASH!")
+    print("⚡ Dash+Q fired")
     
+    -- Просто отправляем ивент, без поворотов/движений
     local communicate = character:FindFirstChild("Communicate")
-    
-    if not communicate then
-        communicate = character:FindFirstChildOfClass("RemoteEvent")
-    end
-    
     if communicate then
-        print("✅ Found:", communicate.Name)
-        
-        local success = pcall(function()
-            communicate:FireServer({
-                Dash = Enum.KeyCode.W,
-                Key = Enum.KeyCode.Q,
-                Goal = "KeyPress"
-            })
+        local args = {
+            [1] = {
+                ["Dash"] = Enum.KeyCode.W,
+                ["Key"] = Enum.KeyCode.Q,
+                ["Goal"] = "KeyPress"
+            }
+        }
+        pcall(function()
+            communicate:FireServer(unpack(args))
         end)
-        
-        if success then
-            print("✅ Sent")
-        else
-            print("❌ Failed")
-        end
         
         task.delay(0.1, function()
+            local releaseArgs = {
+                [1] = {
+                    ["Dash"] = Enum.KeyCode.W,
+                    ["Key"] = Enum.KeyCode.Q,
+                    ["Goal"] = "KeyRelease"
+                }
+            }
             pcall(function()
-                communicate:FireServer({
-                    Dash = Enum.KeyCode.W,
-                    Key = Enum.KeyCode.Q,
-                    Goal = "KeyRelease"
-                })
+                communicate:FireServer(unpack(releaseArgs))
             end)
         end)
-    else
-        print("❌ No Communicate — using VirtualInput")
-        
-        VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.W, false, game)
-        VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Q, false, game)
-        
-        task.wait(0.1)
-        
-        VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Q, false, game)
-        VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.W, false, game)
-        
-        print("✅ VirtualInput sent")
     end
+    
+    -- ЧЕРЕЗ 0.2 СЕКУНДЫ — АИМБОТ
+    task.delay(AIMBOT_DELAY, function()
+        startAimbot()
+    end)
 end
 
 -- === АКТИВАЦИЯ СКИЛЛА ===
@@ -247,65 +266,78 @@ local function activateSkill()
     return false
 end
 
--- === ОТСЛЕЖИВАНИЕ ===
+-- === ОТСЛЕЖИВАНИЕ АНИМАЦИИ ===
 local function setupAnimationTracking()
     local humanoid = character:WaitForChild("Humanoid")
     local animator = humanoid:WaitForChild("Animator")
     
     animator.AnimationPlayed:Connect(function(track)
         local animId = track.Animation and track.Animation.AnimationId
+        
         if animId == ANIM_SKILL_START then
-            print("🔵 Animation")
-            setColor(COLOR_ANIMATION, "ANIM")
+            print("🔵 Animation detected")
+            setColor(COLOR_ANIMATION, "ANIM!")
+            
+            track.Stopped:Connect(function()
+                print("🔵 Animation ended")
+            end)
         end
     end)
 end
 
 -- === ГЛАВНЫЙ ЦИКЛ ===
-print("✅ STARTED")
+print("✅ SCRIPT STARTED")
 
 setupAnimationTracking()
 setColor(COLOR_READY, "READY")
 
 RunService.Heartbeat:Connect(function()
-    if isSpinning then return end
+    if isSpinning or isAiming then return end
     
     local now = tick()
     local cdLeft = COOLDOWN - (now - lastSkillTime)
     
-    timerLabel.Text = cdLeft > 0 and tostring(math.ceil(cdLeft)) or "GO"
+    if cdLeft > 0 then
+        timerLabel.Text = tostring(math.ceil(cdLeft))
+    else
+        timerLabel.Text = "GO"
+    end
     
     local ffNow = checkForceField()
     
-    -- FF появился
+    -- ForceField появился — запускаем вертушку
     if ffNow and not hasForceField then
         hasForceField = true
-        print("🟣 FF APPEARED")
+        print("🟣 ForceField APPEARED — SPIN!")
         task.spawn(megaSpinLoop)
         return
     end
     
-    -- FF пропал
+    -- ForceField пропал — Dash+Q + аимбот через 0.2с
     if hasForceField and not ffNow then
         hasForceField = false
-        isSpinning = false
-        print("⚪ FF GONE")
+        isSpinning = false -- Останавливаем вертушку если еще крутимся
+        print("⚪ ForceField GONE — Dash+Q!")
         
         if skillUsed and dashPending then
             triggerDashQ()
             skillUsed = false
             dashPending = false
         end
-        
-        setColor(COLOR_READY, "READY")
         return
     end
     
     -- FF есть — ждем
-    if ffNow then return end
+    if ffNow and hasForceField then
+        return
+    end
     
     -- Обычное состояние
-    setColor(cdLeft > 0 and COLOR_COOLDOWN or COLOR_READY, cdLeft > 0 and "CD" or "READY")
+    if cdLeft > 0 then
+        setColor(COLOR_COOLDOWN, "CD")
+    else
+        setColor(COLOR_READY, "READY")
+    end
     
     if cdLeft > 0 then return end
     
@@ -316,17 +348,19 @@ RunService.Heartbeat:Connect(function()
         return 
     end
     
+    -- Поворачиваемся к цели
     local targetPos = currentTarget.HRP.Position
     local myPos = hrp.Position
     local dir = Vector3.new(targetPos.X - myPos.X, 0, targetPos.Z - myPos.Z).Unit
     hrp.CFrame = CFrame.new(myPos, myPos + dir)
     
-    setColor(COLOR_CASTING, "CAST")
+    setColor(COLOR_CASTING, "CAST!")
     activateSkill()
 end)
 
 -- === СБРОС ===
 localPlayer.CharacterAdded:Connect(function(newChar)
+    print("🔄 Respawn")
     character = newChar
     hrp = newChar:WaitForChild("HumanoidRootPart")
     
@@ -336,6 +370,7 @@ localPlayer.CharacterAdded:Connect(function(newChar)
     hasForceField = false
     dashPending = false
     isSpinning = false
+    isAiming = false
     
     task.wait(0.5)
     setupAnimationTracking()
