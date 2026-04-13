@@ -16,6 +16,7 @@ local CHECK_RADIUS = 3
 local LIVE_FOLDER = "Live"
 local COOLDOWN = 20
 local SPIN_SPEED = 80
+local RISE_HEIGHT = 3.5  -- На 3.5 стада выше цели во время Dash
 local AIMBOT_DELAY = 0.2
 local AIMBOT_DURATION = 0.3
 
@@ -27,6 +28,7 @@ local COLOR_READY = Color3.fromRGB(100, 255, 100)
 local COLOR_ANIMATION = Color3.fromRGB(0, 150, 255)
 local COLOR_FORCEFIELD = Color3.fromRGB(150, 0, 255)
 local COLOR_CASTING = Color3.fromRGB(255, 200, 0)
+local COLOR_DASH = Color3.fromRGB(255, 150, 0)
 local COLOR_AIMBOT = Color3.fromRGB(255, 50, 50)
 
 -- === СОСТОЯНИЯ ===
@@ -118,14 +120,14 @@ local function checkForceField()
     return currentTarget.Model:FindFirstChild("ForceField") ~= nil
 end
 
--- === АИМБОТ ===
-local function startAimbot()
+-- === АИМБОТ НА ФИКСИРОВАННОЙ ВЫСОТЕ ===
+local function startAimbotAtHeight(fixedY)
     if not currentTarget or not currentTarget.HRP then return end
     if isAiming then return end
     
     isAiming = true
-    print("🎯 AIMBOT START")
-    setColor(COLOR_AIMBOT, "AIMBOT")
+    print("🎯 AIMBOT at Y=" .. string.format("%.1f", fixedY))
+    setColor(COLOR_AIMBOT, "AIMBOT!")
     
     local startTime = tick()
     
@@ -142,9 +144,12 @@ local function startAimbot()
         
         local targetPos = currentTarget.HRP.Position
         local myPos = hrp.Position
-        local dir = Vector3.new(targetPos.X - myPos.X, 0, targetPos.Z - myPos.Z).Unit
         
-        hrp.CFrame = CFrame.new(myPos, myPos + dir)
+        -- На высоте +3.5, смотрим на цель
+        hrp.CFrame = CFrame.new(
+            Vector3.new(myPos.X, fixedY, myPos.Z),
+            Vector3.new(targetPos.X, fixedY, targetPos.Z)
+        )
         
         RunService.Heartbeat:Wait()
     end
@@ -158,13 +163,10 @@ local function megaSpinLoop()
     if isSpinning then return end
     isSpinning = true
     
-    print("🌪️ SPIN START — Same height as target!")
+    print("🌪️ SPIN — Same height as target")
     setColor(COLOR_FORCEFIELD, "SPIN!")
     
-    local startTime = tick()
-    
     while isSpinning do
-        -- Проверяем ForceField
         if not checkForceField() then
             print("⚠️ ForceField lost")
             isSpinning = false
@@ -176,36 +178,49 @@ local function megaSpinLoop()
             break
         end
         
-        local elapsed = tick() - startTime
+        local elapsed = tick() - lastSkillTime
         local spinAngle = elapsed * SPIN_SPEED
         
-        -- === НА ОДНОЙ ВЫСОТЕ С ЦЕЛЬЮ ===
+        -- НА ОДНОЙ ВЫСОТЕ С ЦЕЛЬЮ
         local targetPos = currentTarget.HRP.Position
         local myPos = hrp.Position
         
-        -- Y = высота цели (копируем)
-        local targetY = targetPos.Y
-        
-        -- Ориентация на цель
         local targetDir = Vector3.new(targetPos.X - myPos.X, 0, targetPos.Z - myPos.Z).Unit
         local rotatedDir = CFrame.Angles(0, math.rad(spinAngle), 0) * targetDir
         
-        -- Применяем: крутимся, но на той же высоте что и цель
+        -- Y = высота цели (ровно)
         hrp.CFrame = CFrame.new(
-            Vector3.new(myPos.X, targetY, myPos.Z),
-            Vector3.new(myPos.X, targetY, myPos.Z) + rotatedDir
+            Vector3.new(myPos.X, targetPos.Y, myPos.Z),
+            Vector3.new(myPos.X, targetPos.Y, myPos.Z) + rotatedDir
         )
         
         RunService.Heartbeat:Wait()
     end
     
-    print("🌪️ SPIN ENDED")
+    print("🌪️ SPIN END")
 end
 
--- === DASH+Q + АИМБОТ ЧЕРЕЗ 0.2С ===
+-- === DASH+Q + ПОДЪЕМ НА 3.5 ===
 local function triggerDashQ()
-    print("⚡ Dash+Q")
+    if not currentTarget or not currentTarget.HRP then return end
     
+    print("⚡ Dash+Q + Rise 3.5")
+    setColor(COLOR_DASH, "DASH!")
+    
+    local targetPos = currentTarget.HRP.Position
+    local myPos = hrp.Position
+    local dashY = targetPos.Y + RISE_HEIGHT  -- На 3.5 выше цели
+    
+    -- Поднимаемся
+    hrp.CFrame = CFrame.new(
+        Vector3.new(myPos.X, dashY, myPos.Z),
+        Vector3.new(targetPos.X, dashY, targetPos.Z)
+    )
+    hrp.Velocity = Vector3.new(0, 60, 0)
+    
+    print("🚀 Rise to Y=" .. string.format("%.1f", dashY))
+    
+    -- Dash+Q
     local communicate = character:FindFirstChild("Communicate")
     if communicate then
         local args = {
@@ -233,9 +248,9 @@ local function triggerDashQ()
         end)
     end
     
-    -- Аимбот через 0.2 сек
+    -- Аимбот на высоте +3.5 через 0.2 сек
     task.delay(AIMBOT_DELAY, function()
-        startAimbot()
+        startAimbotAtHeight(dashY)
     end)
 end
 
@@ -263,21 +278,16 @@ local function activateSkill()
     return false
 end
 
--- === ОТСЛЕЖИВАНИЕ АНИМАЦИИ ===
+-- === ОТСЛЕЖИВАНИЕ ===
 local function setupAnimationTracking()
     local humanoid = character:WaitForChild("Humanoid")
     local animator = humanoid:WaitForChild("Animator")
     
     animator.AnimationPlayed:Connect(function(track)
         local animId = track.Animation and track.Animation.AnimationId
-        
         if animId == ANIM_SKILL_START then
             print("🔵 Animation detected")
             setColor(COLOR_ANIMATION, "ANIM!")
-            
-            track.Stopped:Connect(function()
-                print("🔵 Animation ended")
-            end)
         end
     end)
 end
@@ -294,27 +304,23 @@ RunService.Heartbeat:Connect(function()
     local now = tick()
     local cdLeft = COOLDOWN - (now - lastSkillTime)
     
-    if cdLeft > 0 then
-        timerLabel.Text = tostring(math.ceil(cdLeft))
-    else
-        timerLabel.Text = "GO"
-    end
+    timerLabel.Text = cdLeft > 0 and tostring(math.ceil(cdLeft)) or "GO"
     
     local ffNow = checkForceField()
     
-    -- ForceField появился — вертушка на высоте цели
+    -- ForceField появился — вертушка на той же высоте
     if ffNow and not hasForceField then
         hasForceField = true
-        print("🟣 ForceField — SPIN at target height!")
+        print("🟣 ForceField — SPIN same height")
         task.spawn(megaSpinLoop)
         return
     end
     
-    -- ForceField пропал — Dash+Q
+    -- ForceField пропал — Dash с подъемом на 3.5
     if hasForceField and not ffNow then
         hasForceField = false
         isSpinning = false
-        print("⚪ ForceField gone — Dash+Q")
+        print("⚪ ForceField gone — Dash +3.5")
         
         if skillUsed and dashPending then
             triggerDashQ()
@@ -324,21 +330,13 @@ RunService.Heartbeat:Connect(function()
         return
     end
     
-    -- FF есть — ждем
-    if ffNow and hasForceField then
-        return
-    end
-    
     -- Обычное состояние
-    if cdLeft > 0 then
-        setColor(COLOR_COOLDOWN, "CD")
-    else
-        setColor(COLOR_READY, "READY")
-    end
+    if ffNow then return end
+    
+    setColor(cdLeft > 0 and COLOR_COOLDOWN or COLOR_READY, cdLeft > 0 and "CD" or "READY")
     
     if cdLeft > 0 then return end
     
-    -- Ищем цель
     currentTarget = getNearestTarget()
     if not currentTarget then 
         setColor(COLOR_COOLDOWN, "NO TARGET")
@@ -357,7 +355,6 @@ end)
 
 -- === СБРОС ===
 localPlayer.CharacterAdded:Connect(function(newChar)
-    print("🔄 Respawn")
     character = newChar
     hrp = newChar:WaitForChild("HumanoidRootPart")
     
