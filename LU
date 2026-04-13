@@ -15,11 +15,9 @@ local SKILL_NAME = "Lethal Whirlwind Stream"
 local CHECK_RADIUS = 3
 local LIVE_FOLDER = "Live"
 local COOLDOWN = 20
-local RISE_HEIGHT = 7.5
-local RISE_DURATION = 2
 local SPIN_SPEED = 80
-local AIMBOT_DELAY = 0.2  -- 0.2 сек после Dash
-local AIMBOT_DURATION = 0.3 -- 0.3 сек аимбота
+local AIMBOT_DELAY = 0.2
+local AIMBOT_DURATION = 0.3
 
 local ANIM_SKILL_START = "rbxassetid://12296882427"
 
@@ -29,7 +27,7 @@ local COLOR_READY = Color3.fromRGB(100, 255, 100)
 local COLOR_ANIMATION = Color3.fromRGB(0, 150, 255)
 local COLOR_FORCEFIELD = Color3.fromRGB(150, 0, 255)
 local COLOR_CASTING = Color3.fromRGB(255, 200, 0)
-local COLOR_AIMBOT = Color3.fromRGB(255, 50, 50) -- Красный для аимбота
+local COLOR_AIMBOT = Color3.fromRGB(255, 50, 50)
 
 -- === СОСТОЯНИЯ ===
 local currentTarget = nil
@@ -155,60 +153,59 @@ local function startAimbot()
     setColor(COLOR_READY, "READY")
 end
 
--- === МЕГА ВЕРТУШКА (пока есть ForceField) ===
+-- === МЕГА ВЕРТУШКА (НА ОДНОЙ ВЫСОТЕ С ЦЕЛЬЮ) ===
 local function megaSpinLoop()
     if isSpinning then return end
     isSpinning = true
     
-    print("🌪️ MEGA SPIN START!")
+    print("🌪️ SPIN START — Same height as target!")
     setColor(COLOR_FORCEFIELD, "SPIN!")
     
     local startTime = tick()
-    local startY = hrp.Position.Y
     
     while isSpinning do
         -- Проверяем ForceField
         if not checkForceField() then
-            print("⚠️ ForceField lost — spin stopped")
+            print("⚠️ ForceField lost")
+            isSpinning = false
+            break
+        end
+        
+        if not currentTarget or not currentTarget.HRP then
             isSpinning = false
             break
         end
         
         local elapsed = tick() - startTime
-        
-        -- Подъем 7.5 стадов за 2 секунды
-        local progress = math.min(elapsed / RISE_DURATION, 1)
-        local newY = startY + (RISE_HEIGHT * progress)
-        
-        -- Супер кручение
         local spinAngle = elapsed * SPIN_SPEED
         
-        -- Ориентация на цель
-        local targetDir = Vector3.new(0, 0, 1)
-        if currentTarget and currentTarget.HRP then
-            local targetPos = currentTarget.HRP.Position
-            local myPos = hrp.Position
-            targetDir = Vector3.new(targetPos.X - myPos.X, 0, targetPos.Z - myPos.Z).Unit
-        end
+        -- === НА ОДНОЙ ВЫСОТЕ С ЦЕЛЬЮ ===
+        local targetPos = currentTarget.HRP.Position
+        local myPos = hrp.Position
         
+        -- Y = высота цели (копируем)
+        local targetY = targetPos.Y
+        
+        -- Ориентация на цель
+        local targetDir = Vector3.new(targetPos.X - myPos.X, 0, targetPos.Z - myPos.Z).Unit
         local rotatedDir = CFrame.Angles(0, math.rad(spinAngle), 0) * targetDir
         
+        -- Применяем: крутимся, но на той же высоте что и цель
         hrp.CFrame = CFrame.new(
-            Vector3.new(hrp.Position.X, newY, hrp.Position.Z),
-            Vector3.new(hrp.Position.X, newY, hrp.Position.Z) + rotatedDir
+            Vector3.new(myPos.X, targetY, myPos.Z),
+            Vector3.new(myPos.X, targetY, myPos.Z) + rotatedDir
         )
         
         RunService.Heartbeat:Wait()
     end
     
-    print("🌪️ MEGA SPIN ENDED")
+    print("🌪️ SPIN ENDED")
 end
 
--- === DASH+Q (ничего не делаем, только ивент + аимбот через 0.2с) ===
+-- === DASH+Q + АИМБОТ ЧЕРЕЗ 0.2С ===
 local function triggerDashQ()
-    print("⚡ Dash+Q fired")
+    print("⚡ Dash+Q")
     
-    -- Просто отправляем ивент, без поворотов/движений
     local communicate = character:FindFirstChild("Communicate")
     if communicate then
         local args = {
@@ -236,7 +233,7 @@ local function triggerDashQ()
         end)
     end
     
-    -- ЧЕРЕЗ 0.2 СЕКУНДЫ — АИМБОТ
+    -- Аимбот через 0.2 сек
     task.delay(AIMBOT_DELAY, function()
         startAimbot()
     end)
@@ -305,19 +302,19 @@ RunService.Heartbeat:Connect(function()
     
     local ffNow = checkForceField()
     
-    -- ForceField появился — запускаем вертушку
+    -- ForceField появился — вертушка на высоте цели
     if ffNow and not hasForceField then
         hasForceField = true
-        print("🟣 ForceField APPEARED — SPIN!")
+        print("🟣 ForceField — SPIN at target height!")
         task.spawn(megaSpinLoop)
         return
     end
     
-    -- ForceField пропал — Dash+Q + аимбот через 0.2с
+    -- ForceField пропал — Dash+Q
     if hasForceField and not ffNow then
         hasForceField = false
-        isSpinning = false -- Останавливаем вертушку если еще крутимся
-        print("⚪ ForceField GONE — Dash+Q!")
+        isSpinning = false
+        print("⚪ ForceField gone — Dash+Q")
         
         if skillUsed and dashPending then
             triggerDashQ()
