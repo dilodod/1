@@ -15,16 +15,16 @@ local SKILL_NAME = "Lethal Whirlwind Stream"
 local CHECK_RADIUS = 3
 local LIVE_FOLDER = "Live"
 local COOLDOWN = 20
-local JUMP_HEIGHT = 5  -- 5 стадов во время анимации
-local ANIM_SKILL_START = "rbxassetid://12296882427"
+local RISE_HEIGHT = 5      -- 5 стадов вверх
+local RISE_DURATION = 2    -- 2 секунды подъема
+local SPIN_SPEED = 50      -- Нереально быстрая вертушка (градусов в секунду)
 
 -- Цвета
 local COLOR_COOLDOWN = Color3.fromRGB(60, 60, 60)
 local COLOR_READY = Color3.fromRGB(100, 255, 100)
-local COLOR_ANIMATION_TRIGGER = Color3.fromRGB(0, 150, 255)
 local COLOR_FORCEFIELD = Color3.fromRGB(150, 0, 255)
 local COLOR_CASTING = Color3.fromRGB(255, 200, 0)
-local COLOR_MOVE = Color3.fromRGB(255, 150, 0)
+local COLOR_SPIN = Color3.fromRGB(255, 0, 255) -- Фиолетовый для вертушки
 
 -- === СОСТОЯНИЯ ===
 local currentTarget = nil
@@ -32,7 +32,7 @@ local lastSkillTime = -COOLDOWN
 local skillUsed = false
 local hasForceField = false
 local dashPending = false
-local isMoving = false
+local isSpinning = false
 
 -- === GUI ===
 local statusGui = Instance.new("ScreenGui")
@@ -82,38 +82,6 @@ local function setColor(color, text)
     statusTextLabel.Text = text
 end
 
--- === ДВИЖЕНИЕ ПОСЛЕ АНИМАЦИИ (180°+3, 180°+2) ===
-local function postAnimationMove()
-    if isMoving then return end
-    isMoving = true
-    
-    print("↩️ Post-animation: 180°+3, 180°+2")
-    setColor(COLOR_MOVE, "MOVE")
-    
-    local myPos = hrp.Position
-    local lookDir = hrp.CFrame.LookVector
-    
-    -- 180° разворот + 3 стада
-    local dir1 = -lookDir
-    hrp.CFrame = CFrame.new(myPos, myPos + dir1)
-    task.wait(0.03)
-    hrp.CFrame = hrp.CFrame + (dir1 * 3)
-    print("➡️ 180° + 3 studs")
-    
-    task.wait(0.08)
-    
-    -- Еще 180° + 2 стада
-    local dir2 = -dir1  -- Обратно на цель но смещение
-    hrp.CFrame = CFrame.new(hrp.Position, hrp.Position + dir2)
-    task.wait(0.03)
-    hrp.CFrame = hrp.CFrame + (dir2 * 2)
-    print("➡️ 180° + 2 studs")
-    
-    isMoving = false
-    setColor(COLOR_READY, "READY")
-    print("✅ Move done")
-end
-
 -- === ПОИСК ЦЕЛИ ===
 local function getNearestTarget()
     local live = Workspace:FindFirstChild(LIVE_FOLDER)
@@ -146,14 +114,59 @@ local function checkForceField()
     return currentTarget.Model:FindFirstChild("ForceField") ~= nil
 end
 
--- === DASH+Q (когда ForceField пропал) ===
+-- === ВЕРТУШКА + ПОДЪЕМ НА 5 СТАДОВ (2 секунды) ===
+local function startMegaSpin()
+    if isSpinning then return end
+    isSpinning = true
+    
+    print("🌪️ MEGA SPIN STARTED!")
+    setColor(COLOR_SPIN, "SPIN!")
+    
+    local startTime = tick()
+    local startY = hrp.Position.Y
+    local targetY = startY + RISE_HEIGHT
+    
+    while isSpinning do
+        local elapsed = tick() - startTime
+        
+        -- Заканчиваем после 2 секунд
+        if elapsed > RISE_DURATION then
+            isSpinning = false
+            break
+        end
+        
+        -- Подъем: слегка медленно (линейно за 2 секунды)
+        local progress = elapsed / RISE_DURATION
+        local newY = startY + (RISE_HEIGHT * progress)
+        
+        -- Нереально быстрая вертушка
+        local spinAngle = elapsed * SPIN_SPEED
+        
+        -- Применяем позицию и вращение
+        local currentPos = hrp.Position
+        local lookDir = hrp.CFrame.LookVector
+        
+        -- Крутим вокруг оси Y
+        local rotatedDir = CFrame.Angles(0, math.rad(spinAngle), 0) * lookDir
+        
+        hrp.CFrame = CFrame.new(
+            Vector3.new(currentPos.X, newY, currentPos.Z),
+            Vector3.new(currentPos.X, newY, currentPos.Z) + rotatedDir
+        )
+        
+        RunService.Heartbeat:Wait()
+    end
+    
+    print("🌪️ MEGA SPIN ENDED at height:", hrp.Position.Y - startY)
+    setColor(COLOR_FORCEFIELD, "FF")
+end
+
+-- === DASH+Q ===
 local function triggerDashQ()
     if not currentTarget or not currentTarget.HRP then return end
     
-    print("⚡ Dash+Q on ForceField end")
-    setColor(COLOR_ANIMATION_TRIGGER, "DASH+Q")
+    print("⚡ Dash+Q")
     
-    -- Просто Dash+Q без прыжка (прыжок уже был во время анимации)
     local communicate = character:FindFirstChild("Communicate")
     if communicate then
         local args = {
@@ -180,12 +193,6 @@ local function triggerDashQ()
             end)
         end)
     end
-    
-    task.delay(0.5, function()
-        if not isMoving then
-            setColor(COLOR_READY, "READY")
-        end
-    end)
 end
 
 -- === АКТИВАЦИЯ СКИЛЛА ===
@@ -212,40 +219,13 @@ local function activateSkill()
     return false
 end
 
--- === ОТСЛЕЖИВАНИЕ АНИМАЦИИ ===
-local function setupAnimationTracking()
-    local humanoid = character:WaitForChild("Humanoid")
-    local animator = humanoid:WaitForChild("Animator")
-    
-    animator.AnimationPlayed:Connect(function(track)
-        local animId = track.Animation and track.Animation.AnimationId
-        
-        if animId == ANIM_SKILL_START then
-            print("🔵 Animation started - jumping 5 studs")
-            setColor(COLOR_ANIMATION_TRIGGER, "JUMP 5")
-            
-            -- Подлетаем на 5 стадов ВО ВРЕМЯ анимации
-            local newPos = hrp.Position + Vector3.new(0, JUMP_HEIGHT, 0)
-            hrp.CFrame = CFrame.new(newPos, newPos + hrp.CFrame.LookVector)
-            hrp.Velocity = Vector3.new(0, 80, 0)
-            
-            -- Ждем окончания анимации
-            track.Stopped:Connect(function()
-                print("🔵 Animation ended - post move")
-                postAnimationMove()
-            end)
-        end
-    end)
-end
-
 -- === ГЛАВНЫЙ ЦИКЛ ===
 print("✅ SCRIPT STARTED")
 
-setupAnimationTracking()
 setColor(COLOR_READY, "READY")
 
 RunService.Heartbeat:Connect(function()
-    if isMoving then return end
+    if isSpinning then return end
     
     local now = tick()
     local cdLeft = COOLDOWN - (now - lastSkillTime)
@@ -258,7 +238,7 @@ RunService.Heartbeat:Connect(function()
     
     local ffNow = checkForceField()
     
-    -- ForceField пропал - Dash+Q
+    -- ForceField пропал
     if hasForceField and not ffNow then
         hasForceField = false
         print("⚪ ForceField GONE!")
@@ -269,12 +249,16 @@ RunService.Heartbeat:Connect(function()
         end
     end
     
-    -- ForceField появился
-    if ffNow then
-        if not hasForceField then
-            print("🟣 ForceField APPEARED!")
-        end
+    -- ForceField ПОЯВИЛСЯ — начинаем вертушку!
+    if ffNow and not hasForceField then
         hasForceField = true
+        print("🟣 ForceField APPEARED — GRAB SUCCESS!")
+        startMegaSpin()
+        return
+    end
+    
+    -- Если FF есть но мы не крутимся (уже закончили)
+    if ffNow and hasForceField and not isSpinning then
         setColor(COLOR_FORCEFIELD, "FF")
         return
     end
@@ -316,9 +300,8 @@ localPlayer.CharacterAdded:Connect(function(newChar)
     skillUsed = false
     hasForceField = false
     dashPending = false
-    isMoving = false
+    isSpinning = false
     
     task.wait(0.5)
-    setupAnimationTracking()
     setColor(COLOR_READY, "READY")
 end)
