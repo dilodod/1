@@ -10,14 +10,15 @@ local character = player.Character or player.CharacterAdded:Wait()
 local humanoid = character:WaitForChild("Humanoid")
 local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
 
+-- Получаем Animator (НОВЫЙ способ!)
+local animator = humanoid:WaitForChild("Animator")
+
 -- Настройки
 local HIGHLIGHT_COLOR_BENCH = Color3.fromRGB(0, 255, 0)
 local HIGHLIGHT_COLOR_TRASH = Color3.fromRGB(255, 0, 0)
 local MAX_DISTANCE = 500
 local WALK_SPEED = 32
-local PROXIMITY_DISTANCE = 3.5 -- Дистанция "в притык"
-local FLY_UP_HEIGHT = 50
-local FLY_SIDE_DISTANCE = 14
+local PROXIMITY_DISTANCE = 3.5
 
 -- Анимации
 local ANIM_ID_1 = "rbxassetid://180436334"
@@ -134,7 +135,7 @@ local function stopMoving()
     humanoid:MoveTo(humanoidRootPart.Position)
 end
 
--- Основная анимационная последовательность "в притык"
+-- ОСНОВНАЯ АНИМАЦИОННАЯ ПОСЛЕДОВАТЕЛЬНОСТЬ
 local function playProximitySequence(targetObj)
     if isAnimating then return end
     isAnimating = true
@@ -146,11 +147,11 @@ local function playProximitySequence(targetObj)
         return 
     end
     
-    -- Отключаем физику персонажа на время анимации
-    humanoid.PlatformStand = true
+    -- Отключаем управление
+    humanoid.AutoRotate = false
     
     -- 1. ПРИЖИМАЕМСЯ К ПАРТУ (0.2 сек)
-    local targetCFrame = targetPart.CFrame * CFrame.new(0, 0, -2) -- Спереди на 2 студа
+    local targetCFrame = targetPart.CFrame * CFrame.new(0, 0, -2.5)
     local tween1 = TweenService:Create(
         humanoidRootPart,
         TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
@@ -159,7 +160,7 @@ local function playProximitySequence(targetObj)
     tween1:Play()
     tween1.Completed:Wait()
     
-    -- 2. ЗАКРЕПЛЯЕМСЯ (0.1 сек подъём на 2 студа)
+    -- 2. ЗАКРЕПЛЯЕМСЯ — подъём на 2 студа (0.1 сек)
     local attachCFrame = humanoidRootPart.CFrame * CFrame.new(0, 2, 0)
     local tween2 = TweenService:Create(
         humanoidRootPart,
@@ -169,64 +170,71 @@ local function playProximitySequence(targetObj)
     tween2:Play()
     tween2.Completed:Wait()
     
-    -- 3. ПРОИГРЫВАЕМ АНИМАЦИЮ 180436334 (0.3 сек)
+    -- 3. АНИМАЦИЯ 1 — быстро 0.3 сек, потом стоп (поза застывает)
     local anim1 = Instance.new("Animation")
     anim1.AnimationId = ANIM_ID_1
-    local track1 = humanoid:LoadAnimation(anim1)
+    local track1 = animator:LoadAnimation(anim1) -- ЧЕРЕЗ ANIMATOR!
+    track1.Looped = false
     track1:Play()
-    track1:AdjustSpeed(3.33) -- 0.3 сек = 3.33x скорость (стандарт 1 сек)
+    track1:AdjustSpeed(3.33) -- 0.3 сек вместо 1 сек
     
     task.wait(0.3)
-    track1:AdjustSpeed(0) -- Останавливаем, поза застывает
+    track1:AdjustSpeed(0) -- СТОП, поза застывает
     
-    -- 4. ЖДЁМ 0.5 сек
+    -- 4. ПАУЗА 0.5 сек
     task.wait(0.5)
     
-    -- 5. АКТИВИРУЕМ REMOTEEVENT
-    local communicate = character:FindFirstChild("Communicate")
-    if communicate and communicate:IsA("RemoteEvent") then
-        communicate:FireServer()
-    end
+    -- 5. АКТИВИРУЕМ REMOTEEVENT (1 раз!)
+    task.spawn(function()
+        local communicate = character:FindFirstChild("Communicate")
+        if communicate and communicate:IsA("RemoteEvent") then
+            communicate:FireServer()
+        end
+    end)
     
-    -- 6. НАЧИНАЕМ ПОДЛЁТ (0.1 сек задержка + подлёт 0.3 сек)
-    -- Сначала включаем PlatformStand для физики полёта
-    humanoid.PlatformStand = true
+    -- 6. ПОДЛЁТ — сначала 0.1 сек, потом подлёт 0.3 сек
+    task.wait(0.1)
     
-    -- Создаём BodyVelocity для контроля полёта
+    -- Создаём BodyVelocity и BodyGyro для полёта
     local bodyVel = Instance.new("BodyVelocity")
-    bodyVel.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+    bodyVel.MaxForce = Vector3.new(9e9, 9e9, 9e9)
     bodyVel.Velocity = Vector3.zero
+    bodyVel.P = 12500
     bodyVel.Parent = humanoidRootPart
     
     local bodyGyro = Instance.new("BodyGyro")
-    bodyGyro.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
+    bodyGyro.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
     bodyGyro.CFrame = humanoidRootPart.CFrame
+    bodyGyro.P = 10000
     bodyGyro.Parent = humanoidRootPart
     
-    -- Подлёт вверх на 50 стадов + вбок на 14 стадов
-    local flyGoal = humanoidRootPart.CFrame * CFrame.new(FLY_SIDE_DISTANCE, FLY_UP_HEIGHT, 0)
-    
-    task.wait(0.1) -- Задержка 0.1 перед подлётом
+    -- Цель: вверх на 50 стадов, вбок на 14 стадов
+    local startPos = humanoidRootPart.Position
+    local sideOffset = humanoidRootPart.CFrame.RightVector * FLY_SIDE_DISTANCE
+    local flyGoal = CFrame.new(startPos + sideOffset + Vector3.new(0, FLY_UP_HEIGHT, 0))
     
     local tween3 = TweenService:Create(
         humanoidRootPart,
         TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
         {CFrame = flyGoal}
     )
-    tween3:Play()
     
-    -- 7. ВО ВРЕМЯ ПОДЛЁТА — АНИМАЦИЯ 10480793962
+    -- 7. АНИМАЦИЯ 2 — во время подлёта
     local anim2 = Instance.new("Animation")
     anim2.AnimationId = ANIM_ID_2
-    local track2 = humanoid:LoadAnimation(anim2)
+    local track2 = animator:LoadAnimation(anim2) -- ЧЕРЕЗ ANIMATOR!
+    track2.Looped = false
     track2:Play()
     
+    tween3:Play()
     tween3.Completed:Wait()
     
-    -- Чистим
+    -- Чистим физику
     bodyVel:Destroy()
     bodyGyro:Destroy()
-    humanoid.PlatformStand = false
+    
+    -- Восстанавливаем управление
+    humanoid.AutoRotate = true
     isAnimating = false
 end
 
@@ -291,7 +299,6 @@ local function moveToObject(targetObj)
             
             local startTime = tick()
             while not reached and isRunning and not isAnimating do
-                -- Проверяем дистанцию во время движения
                 local dist = (humanoidRootPart.Position - targetPos).Magnitude
                 if dist <= PROXIMITY_DISTANCE then
                     if connection then connection:Disconnect() end
@@ -313,7 +320,7 @@ local function moveToObject(targetObj)
             end
         end
         
-        -- После всех waypoints проверяем ещё раз дистанцию
+        -- Финальная проверка
         local finalDist = (humanoidRootPart.Position - targetPos).Magnitude
         if finalDist <= PROXIMITY_DISTANCE then
             stopMoving()
@@ -322,8 +329,8 @@ local function moveToObject(targetObj)
         end
         
     else
+        -- Прямое движение если путь не найден
         humanoid:MoveTo(targetPos)
-        -- Ждём приближения
         while isRunning and not isAnimating do
             local dist = (humanoidRootPart.Position - targetPos).Magnitude
             if dist <= PROXIMITY_DISTANCE then
@@ -403,6 +410,10 @@ player.CharacterAdded:Connect(function(newChar)
     character = newChar
     humanoid = newChar:WaitForChild("Humanoid")
     humanoidRootPart = newChar:WaitForChild("HumanoidRootPart")
+    
+    -- Ждём Animator в новом персонаже!
+    animator = humanoid:WaitForChild("Animator")
+    
     humanoid.WalkSpeed = WALK_SPEED
     isRunning = false
     isAnimating = false
@@ -443,4 +454,4 @@ end
 
 createButton()
 
-print("Скрипт загружен! Скорость:", WALK_SPEED, "Притык:", PROXIMITY_DISTANCE)
+print("Скрипт загружен! Animator:", animator ~= nil)
