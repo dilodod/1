@@ -1,313 +1,608 @@
--- ============================================
--- AUTO-FLING SYSTEM (Original SkidFling)
--- Работает только если: ТЫ + 1 ИГРОК (всего 2)
--- ============================================
+-- Полный локальный скрипт (LocalScript)
+-- Разместить в: StarterPlayerScripts или StarterGui
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
-local Player = Players.LocalPlayer
 
--- ============================================
--- ПРОВЕРКА ИГРОКОВ
--- ============================================
+local player = Players.LocalPlayer
+local camera = workspace.CurrentCamera
 
-if #Players:GetPlayers() > 2 then
-    warn("❌ TOO MANY PLAYERS. Script disabled.")
-    return
+-- ═══════════════════════════════════════════════════════════
+-- НАСТРОЙКИ ПОИСКА ОБЪЕКТОВ
+-- ═══════════════════════════════════════════════════════════
+
+local SETTINGS = {
+	-- Главное: НЕ высокие (не земля)
+	MaxHeight = 5,           -- Максимальная высота объекта (Y)
+	MinHeight = 0.1,         -- Минимальная высота (чтобы не было слишком плоских)
+	
+	-- НЕ большие (по объёму/площади)
+	MaxBaseSize = 30,        -- Максимальная площадь основания (X * Z)
+	MaxVolume = 100,         -- Максимальный объём
+	
+	-- МОГУТ быть длинные (в любую сторону)
+	MaxLengthRatio = 10,     -- Максимальное отношение длины к ширине/высоте
+	
+	-- Группировка рядом стоящих
+	GroupRadius = 15,        -- Радиус для группировки объектов
+	MinGroupSize = 2,        -- Минимум объектов для подсветки группы
+	
+	-- Визуал
+	HighlightColor = Color3.fromRGB(0, 255, 255),    -- Цвет подсветки
+	GroupHighlightColor = Color3.fromRGB(255, 165, 0), -- Цвет группы
+	OutlineColor = Color3.fromRGB(255, 255, 255),
+	Transparency = 0.5,
+	
+	-- Производительность
+	ScanInterval = 2,        -- Секунды между сканированиями
+	MaxObjects = 500,        -- Максимум объектов для проверки
+}
+
+-- ═══════════════════════════════════════════════════════════
+-- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+-- ═══════════════════════════════════════════════════════════
+
+local function getModelSize(model)
+	-- Получаем размеры модели через BoundingBox
+	local success, result = pcall(function()
+		return model:GetBoundingBox()
+	end)
+	
+	if success and result then
+		local cf, size = result[1], result[2]
+		return size
+	end
+	
+	-- Fallback: считаем через детей
+	local minPos = Vector3.new(math.huge, math.huge, math.huge)
+	local maxPos = Vector3.new(-math.huge, -math.huge, -math.huge)
+	local hasParts = false
+	
+	for _, child in ipairs(model:GetDescendants()) do
+		if child:IsA("BasePart") then
+			hasParts = true
+			local pos = child.Position
+			local halfSize = child.Size / 2
+			
+			minPos = Vector3.new(
+				math.min(minPos.X, pos.X - halfSize.X),
+				math.min(minPos.Y, pos.Y - halfSize.Y),
+				math.min(minPos.Z, pos.Z - halfSize.Z)
+			)
+			maxPos = Vector3.new(
+				math.max(maxPos.X, pos.X + halfSize.X),
+				math.max(maxPos.Y, pos.Y + halfSize.Y),
+				math.max(maxPos.Z, pos.Z + halfSize.Z)
+			)
+		end
+	end
+	
+	if hasParts then
+		return maxPos - minPos
+	end
+	
+	return nil
 end
 
-Players.PlayerAdded:Connect(function()
-    if #Players:GetPlayers() > 2 then
-        warn("❌ NEW PLAYER JOINED. Disabling...")
-        -- Остановить все циклы здесь если нужно
-    end
+local function getModelCenter(model)
+	local success, result = pcall(function()
+		return model:GetBoundingBox()
+	end)
+	
+	if success and result then
+		return result[1].Position
+	end
+	
+	-- Fallback
+	local totalPos = Vector3.zero
+	local count = 0
+	
+	for _, child in ipairs(model:GetDescendants()) do
+		if child:IsA("BasePart") then
+			totalPos += child.Position
+			count += 1
+		end
+	end
+	
+	if count > 0 then
+		return totalPos / count
+	end
+	
+	return nil
+end
+
+local function isGroundLike(size, position)
+	-- Проверяем, похож ли объект на землю/пол
+	if not size or not position then return true end
+	
+	local baseArea = size.X * size.Z
+	local volume = baseArea * size.Y
+	
+	-- Земля обычно: очень широкая, очень низкая, огромная площадь
+	if size.Y < 2 and baseArea > 100 then
+		return true
+	end
+	
+	-- Очень большой объём = скорее всего земля/террейн
+	if volume > 1000 then
+		return true
+	end
+	
+	return false
+end
+
+local function matchesCriteria(model)
+	-- Проверяем, подходит ли объект под критерии
+	
+	local size = getModelSize(model)
+	local center = getModelCenter(model)
+	
+	if not size or not center then return false end
+	
+	-- 1. НЕ высокие (главное)
+	if size.Y > SETTINGS.MaxHeight then
+		return false
+	end
+	if size.Y < SETTINGS.MinHeight then
+		return false
+	end
+	
+	-- 2. НЕ похожи на землю
+	if isGroundLike(size, center) then
+		return false
+	end
+	
+	-- 3. НЕ большие (по площади основания)
+	local baseArea = size.X * size.Z
+	if baseArea > SETTINGS.MaxBaseSize then
+		return false
+	end
+	
+	-- 4. НЕ большие по объёму
+	local volume = baseArea * size.Y
+	if volume > SETTINGS.MaxVolume then
+		return false
+	end
+	
+	-- 5. МОГУТ быть длинные (проверяем соотношение сторон)
+	local maxDim = math.max(size.X, size.Y, size.Z)
+	local minDim = math.min(size.X, size.Y, size.Z)
+	
+	if minDim > 0 then
+		local ratio = maxDim / minDim
+		if ratio > SETTINGS.MaxLengthRatio then
+			-- Слишком вытянутый - пропускаем
+			return false
+		end
+	end
+	
+	return true, size, center
+end
+
+-- ═══════════════════════════════════════════════════════════
+-- СИСТЕМА ПОДСВЕТКИ
+-- ═══════════════════════════════════════════════════════════
+
+local HighlightsFolder = Instance.new("Folder")
+HighlightsFolder.Name = "ObjectHighlights"
+HighlightsFolder.Parent = workspace
+
+local activeHighlights = {}
+
+local function clearHighlights()
+	for _, highlight in ipairs(activeHighlights) do
+		if highlight then
+			highlight:Destroy()
+		end
+	end
+	activeHighlights = {}
+end
+
+local function createHighlight(model, color)
+	if not model or not model.Parent then return end
+	
+	-- Проверяем, нет ли уже подсветки
+	for _, existing in ipairs(activeHighlights) do
+		if existing.Adornee == model then
+			return
+		end
+	end
+	
+	local highlight = Instance.new("Highlight")
+	highlight.Name = "FinderHighlight"
+	highlight.Adornee = model
+	highlight.FillColor = color or SETTINGS.HighlightColor
+	highlight.OutlineColor = SETTINGS.OutlineColor
+	highlight.FillTransparency = SETTINGS.Transparency
+	highlight.OutlineTransparency = 0
+	highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+	highlight.Parent = HighlightsFolder
+	
+	table.insert(activeHighlights, highlight)
+	return highlight
+end
+
+-- ═══════════════════════════════════════════════════════════
+-- ПОИСК И ГРУППИРОВКА
+-- ═══════════════════════════════════════════════════════════
+
+local function findValidObjects()
+	local validObjects = {}
+	local checked = 0
+	
+	-- Сканируем workspace
+	for _, obj in ipairs(workspace:GetDescendants()) do
+		if checked >= SETTINGS.MaxObjects then break end
+		
+		-- Проверяем только Model и Parts
+		if obj:IsA("Model") or obj:IsA("BasePart") then
+			-- Пропускаем персонажей игроков
+			if obj:IsA("Model") and obj:FindFirstChildOfClass("Humanoid") then
+				continue
+			end
+			
+			-- Пропускаем части персонажей
+			if obj:IsA("BasePart") then
+				local char = obj:FindFirstAncestorOfClass("Model")
+				if char and char:FindFirstChildOfClass("Humanoid") then
+					continue
+				end
+			end
+			
+			local target = obj
+			if obj:IsA("BasePart") then
+				-- Для частей берём родительскую модель если есть
+				target = obj:FindFirstAncestorOfClass("Model") or obj
+			end
+			
+			-- Проверяем критерии
+			local matches, size, center = matchesCriteria(target)
+			if matches then
+				-- Проверяем, не добавили ли уже
+				local alreadyAdded = false
+				for _, existing in ipairs(validObjects) do
+					if existing.Object == target then
+						alreadyAdded = true
+						break
+					end
+				end
+				
+				if not alreadyAdded then
+					table.insert(validObjects, {
+						Object = target,
+						Size = size,
+						Center = center
+					})
+				end
+			end
+			
+			checked += 1
+		end
+	end
+	
+	return validObjects
+end
+
+local function groupNearbyObjects(objects)
+	-- Группируем объекты по близости
+	local groups = {}
+	local assigned = {}
+	
+	for i, objData in ipairs(objects) do
+		if assigned[i] then continue end
+		
+		local group = {objData}
+		assigned[i] = true
+		
+		for j, otherData in ipairs(objects) do
+			if i == j or assigned[j] then continue end
+			
+			local distance = (objData.Center - otherData.Center).Magnitude
+			if distance <= SETTINGS.GroupRadius then
+				table.insert(group, otherData)
+				assigned[j] = true
+			end
+		end
+		
+		table.insert(groups, group)
+	end
+	
+	return groups
+end
+
+-- ═══════════════════════════════════════════════════════════
+-- ОСНОВНОЙ СКАНЕР
+-- ═══════════════════════════════════════════════════════════
+
+local function scanAndHighlight()
+	clearHighlights()
+	
+	print("🔍 Сканирование объектов...")
+	local validObjects = findValidObjects()
+	print("✅ Найдено подходящих объектов: " .. #validObjects)
+	
+	if #validObjects == 0 then
+		print("❌ Нет объектов, соответствующих критериям")
+		return
+	end
+	
+	local groups = groupNearbyObjects(validObjects)
+	print("📦 Сформировано групп: " .. #groups)
+	
+	for _, group in ipairs(groups) do
+		local isGroup = #group >= SETTINGS.MinGroupSize
+		
+		for _, objData in ipairs(group) do
+			local color = isGroup and SETTINGS.GroupHighlightColor or SETTINGS.HighlightColor
+			createHighlight(objData.Object, color)
+			
+			if isGroup then
+				print(string.format("  📍 ГРУППА [%d объектов]: %s", #group, objData.Object:GetFullName()))
+			else
+				print(string.format("  📍 Одиночный: %s", objData.Object:GetFullName()))
+			end
+		end
+	end
+	
+	print(string.format("🎨 Подсвечено объектов: %d", #activeHighlights))
+end
+
+-- ═══════════════════════════════════════════════════════════
+-- UI ИНТЕРФЕЙС
+-- ═══════════════════════════════════════════════════════════
+
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "ObjectFinderUI"
+screenGui.ResetOnSpawn = false
+screenGui.Parent = player:WaitForChild("PlayerGui")
+
+-- Основная панель
+local mainFrame = Instance.new("Frame")
+mainFrame.Name = "MainPanel"
+mainFrame.Size = UDim2.new(0, 320, 0, 400)
+mainFrame.Position = UDim2.new(0, 20, 0.5, -200)
+mainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
+mainFrame.BorderSizePixel = 0
+mainFrame.Parent = screenGui
+
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 12)
+corner.Parent = mainFrame
+
+-- Заголовок
+local title = Instance.new("TextLabel")
+title.Name = "Title"
+title.Size = UDim2.new(1, 0, 0, 40)
+title.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+title.Text = "🔍 Object Finder"
+title.TextColor3 = Color3.fromRGB(255, 255, 255)
+title.TextSize = 18
+title.Font = Enum.Font.GothamBold
+title.Parent = mainFrame
+
+local titleCorner = Instance.new("UICorner")
+titleCorner.CornerRadius = UDim.new(0, 12)
+titleCorner.Parent = title
+
+-- Скроллируемая область для настроек
+local scrollFrame = Instance.new("ScrollingFrame")
+scrollFrame.Name = "Settings"
+scrollFrame.Size = UDim2.new(1, -20, 1, -140)
+scrollFrame.Position = UDim2.new(0, 10, 0, 50)
+scrollFrame.BackgroundTransparency = 1
+scrollFrame.ScrollBarThickness = 4
+scrollFrame.CanvasSize = UDim2.new(0, 0, 0, 500)
+scrollFrame.Parent = mainFrame
+
+local layout = Instance.new("UIListLayout")
+layout.Padding = UDim.new(0, 8)
+layout.Parent = scrollFrame
+
+-- Функция создания слайдера настройки
+local function createSetting(name, defaultValue, min, max, callback)
+	local frame = Instance.new("Frame")
+	frame.Size = UDim2.new(1, -10, 0, 60)
+	frame.BackgroundTransparency = 1
+	frame.Parent = scrollFrame
+	
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.new(1, 0, 0, 20)
+	label.BackgroundTransparency = 1
+	label.Text = name .. ": " .. tostring(defaultValue)
+	label.TextColor3 = Color3.fromRGB(200, 200, 200)
+	label.TextSize = 14
+	label.Font = Enum.Font.Gotham
+	label.TextXAlignment = Enum.TextXAlignment.Left
+	label.Parent = frame
+	
+	local sliderBg = Instance.new("Frame")
+	sliderBg.Size = UDim2.new(1, 0, 0, 8)
+	sliderBg.Position = UDim2.new(0, 0, 0, 30)
+	sliderBg.BackgroundColor3 = Color3.fromRGB(60, 60, 70)
+	sliderBg.BorderSizePixel = 0
+	sliderBg.Parent = frame
+	
+	local sliderCorner = Instance.new("UICorner")
+	sliderCorner.CornerRadius = UDim.new(1, 0)
+	sliderCorner.Parent = sliderBg
+	
+	local sliderFill = Instance.new("Frame")
+	sliderFill.Size = UDim2.new((defaultValue - min) / (max - min), 0, 1, 0)
+	sliderFill.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
+	sliderFill.BorderSizePixel = 0
+	sliderFill.Parent = sliderBg
+	
+	local fillCorner = Instance.new("UICorner")
+	fillCorner.CornerRadius = UDim.new(1, 0)
+	fillCorner.Parent = sliderFill
+	
+	local dragging = false
+	
+	sliderBg.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or 
+		   input.UserInputType == Enum.UserInputType.Touch then
+			dragging = true
+		end
+	end)
+	
+	UserInputService.InputChanged:Connect(function(input)
+		if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or 
+						 input.UserInputType == Enum.UserInputType.Touch) then
+			local pos = math.clamp((input.Position.X - sliderBg.AbsolutePosition.X) / sliderBg.AbsoluteSize.X, 0, 1)
+			local value = min + (max - min) * pos
+			value = math.floor(value * 10) / 10
+			
+			sliderFill.Size = UDim2.new(pos, 0, 1, 0)
+			label.Text = name .. ": " .. tostring(value)
+			callback(value)
+		end
+	end)
+	
+	UserInputService.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or 
+		   input.UserInputType == Enum.UserInputType.Touch then
+			dragging = false
+		end
+	end)
+	
+	return frame
+end
+
+-- Создаём настройки
+createSetting("MaxHeight (не высокие)", SETTINGS.MaxHeight, 0.5, 20, function(v)
+	SETTINGS.MaxHeight = v
 end)
 
-print("✅ 2 players detected. Starting auto-fling...")
-
--- ============================================
--- ОРИГИНАЛЬНАЯ ФУНКЦИЯ ФЛИНГА (без изменений)
--- ============================================
-
-local AllBool = false
-
-local GetPlayer = function(Name)
-    Name = Name:lower()
-    if Name == "all" or Name == "others" then
-        AllBool = true
-        return
-    elseif Name == "random" then
-        local GetPlayers = Players:GetPlayers()
-        if table.find(GetPlayers, Player) then table.remove(GetPlayers, table.find(GetPlayers, Player)) end
-        return GetPlayers[math.random(#GetPlayers)]
-    elseif Name ~= "random" and Name ~= "all" and Name ~= "others" then
-        for _, x in next, Players:GetPlayers() do
-            if x ~= Player then
-                if x.Name:lower():match("^"..Name) then
-                    return x;
-                elseif x.DisplayName:lower():match("^"..Name) then
-                    return x;
-                end
-            end
-        end
-    else
-        return
-    end
-end
-
-local Message = function(_Title, _Text, Time)
-    game:GetService("StarterGui"):SetCore("SendNotification", {Title = _Title, Text = _Text, Duration = Time})
-end
-
--- ОРИГИНАЛЬНЫЙ SKIDFLING (без изменений)
-local SkidFling = function(TargetPlayer)
-    local Character = Player.Character
-    local Humanoid = Character and Character:FindFirstChildOfClass("Humanoid")
-    local RootPart = Humanoid and Humanoid.RootPart
-
-    local TCharacter = TargetPlayer.Character
-    local THumanoid
-    local TRootPart
-    local THead
-    local Accessory
-    local Handle
-
-    if TCharacter:FindFirstChildOfClass("Humanoid") then
-        THumanoid = TCharacter:FindFirstChildOfClass("Humanoid")
-    end
-    if THumanoid and THumanoid.RootPart then
-        TRootPart = THumanoid.RootPart
-    end
-    if TCharacter:FindFirstChild("Head") then
-        THead = TCharacter.Head
-    end
-    if TCharacter:FindFirstChildOfClass("Accessory") then
-        Accessory = TCharacter:FindFirstChildOfClass("Accessory")
-    end
-    if Accessory and Accessory:FindFirstChild("Handle") then
-        Handle = Accessory.Handle
-    end
-
-    if Character and Humanoid and RootPart then
-        if RootPart.Velocity.Magnitude < 50 then
-            getgenv().OldPos = RootPart.CFrame
-        end
-        if THumanoid and THumanoid.Sit and not AllBool then
-            return Message("Error", "Target is sitting", 3)
-        end
-        if THead then
-            workspace.CurrentCamera.CameraSubject = THead
-        elseif not THead and Handle then
-            workspace.CurrentCamera.CameraSubject = Handle
-        elseif THumanoid and TRootPart then
-            workspace.CurrentCamera.CameraSubject = THumanoid
-        end
-        if not TCharacter:FindFirstChildWhichIsA("BasePart") then
-            return
-        end
-        
-        local FPos = function(BasePart, Pos, Ang)
-            RootPart.CFrame = CFrame.new(BasePart.Position) * Pos * Ang
-            Character:SetPrimaryPartCFrame(CFrame.new(BasePart.Position) * Pos * Ang)
-            RootPart.Velocity = Vector3.new(9e7, 9e7 * 10, 9e7)
-            RootPart.RotVelocity = Vector3.new(9e8, 9e8, 9e8)
-        end
-        
-        local SFBasePart = function(BasePart)
-            local TimeToWait = 2
-            local Time = tick()
-            local Angle = 0
-
-            repeat
-                if RootPart and THumanoid then
-                    if BasePart.Velocity.Magnitude < 50 then
-                        Angle = Angle + 100
-
-                        FPos(BasePart, CFrame.new(0, 1.5, 0) + THumanoid.MoveDirection * BasePart.Velocity.Magnitude / 1.25, CFrame.Angles(math.rad(Angle),0 ,0))
-                        task.wait()
-
-                        FPos(BasePart, CFrame.new(0, -1.5, 0) + THumanoid.MoveDirection * BasePart.Velocity.Magnitude / 1.25, CFrame.Angles(math.rad(Angle), 0, 0))
-                        task.wait()
-
-                        FPos(BasePart, CFrame.new(2.25, 1.5, -2.25) + THumanoid.MoveDirection * BasePart.Velocity.Magnitude / 1.25, CFrame.Angles(math.rad(Angle), 0, 0))
-                        task.wait()
-
-                        FPos(BasePart, CFrame.new(-2.25, -1.5, 2.25) + THumanoid.MoveDirection * BasePart.Velocity.Magnitude / 1.25, CFrame.Angles(math.rad(Angle), 0, 0))
-                        task.wait()
-
-                        FPos(BasePart, CFrame.new(0, 1.5, 0) + THumanoid.MoveDirection,CFrame.Angles(math.rad(Angle), 0, 0))
-                        task.wait()
-
-                        FPos(BasePart, CFrame.new(0, -1.5, 0) + THumanoid.MoveDirection,CFrame.Angles(math.rad(Angle), 0, 0))
-                        task.wait()
-                    else
-                        FPos(BasePart, CFrame.new(0, 1.5, THumanoid.WalkSpeed), CFrame.Angles(math.rad(90), 0, 0))
-                        task.wait()
-
-                        FPos(BasePart, CFrame.new(0, -1.5, -THumanoid.WalkSpeed), CFrame.Angles(0, 0, 0))
-                        task.wait()
-
-                        FPos(BasePart, CFrame.new(0, 1.5, THumanoid.WalkSpeed), CFrame.Angles(math.rad(90), 0, 0))
-                        task.wait()
-                        
-                        FPos(BasePart, CFrame.new(0, 1.5, TRootPart.Velocity.Magnitude / 1.25), CFrame.Angles(math.rad(90), 0, 0))
-                        task.wait()
-
-                        FPos(BasePart, CFrame.new(0, -1.5, -TRootPart.Velocity.Magnitude / 1.25), CFrame.Angles(0, 0, 0))
-                        task.wait()
-
-                        FPos(BasePart, CFrame.new(0, 1.5, TRootPart.Velocity.Magnitude / 1.25), CFrame.Angles(math.rad(90), 0, 0))
-                        task.wait()
-
-                        FPos(BasePart, CFrame.new(0, -1.5, 0), CFrame.Angles(math.rad(90), 0, 0))
-                        task.wait()
-
-                        FPos(BasePart, CFrame.new(0, -1.5, 0), CFrame.Angles(0, 0, 0))
-                        task.wait()
-
-                        FPos(BasePart, CFrame.new(0, -1.5 ,0), CFrame.Angles(math.rad(-90), 0, 0))
-                        task.wait()
-
-                        FPos(BasePart, CFrame.new(0, -1.5, 0), CFrame.Angles(0, 0, 0))
-                        task.wait()
-                    end
-                else
-                    break
-                end
-            until BasePart.Velocity.Magnitude > 500 or BasePart.Parent ~= TargetPlayer.Character or TargetPlayer.Parent ~= Players or not TargetPlayer.Character == TCharacter or THumanoid.Sit or Humanoid.Health <= 0 or tick() > Time + TimeToWait
-        end
-        
-        workspace.FallenPartsDestroyHeight = 0/0
-        
-        local BV = Instance.new("BodyVelocity")
-        BV.Name = "EpixVel"
-        BV.Parent = RootPart
-        BV.Velocity = Vector3.new(9e8, 9e8, 9e8)
-        BV.MaxForce = Vector3.new(1/0, 1/0, 1/0)
-        
-        Humanoid:SetStateEnabled(Enum.HumanoidStateType.Seated, false)
-        
-        if TRootPart and THead then
-            if (TRootPart.CFrame.p - THead.CFrame.p).Magnitude > 5 then
-                SFBasePart(THead)
-            else
-                SFBasePart(TRootPart)
-            end
-        elseif TRootPart and not THead then
-            SFBasePart(TRootPart)
-        elseif not TRootPart and THead then
-            SFBasePart(THead)
-        elseif not TRootPart and not THead and Accessory and Handle then
-            SFBasePart(Handle)
-        else
-            return Message("Error", "Target is missing parts", 3)
-        end
-        
-        BV:Destroy()
-        Humanoid:SetStateEnabled(Enum.HumanoidStateType.Seated, true)
-        workspace.CurrentCamera.CameraSubject = Humanoid
-        
-        repeat
-            RootPart.CFrame = getgenv().OldPos * CFrame.new(0, .5, 0)
-            Character:SetPrimaryPartCFrame(getgenv().OldPos * CFrame.new(0, .5, 0))
-            Humanoid:ChangeState("GettingUp")
-            table.foreach(Character:GetChildren(), function(_, x)
-                if x:IsA("BasePart") then
-                    x.Velocity, x.RotVelocity = Vector3.new(), Vector3.new()
-                end
-            end)
-            task.wait()
-        until (RootPart.Position - getgenv().OldPos.p).Magnitude < 25
-        workspace.FallenPartsDestroyHeight = getgenv().FPDH
-    else
-        return Message("Error", "Character error", 3)
-    end
-end
-
--- ============================================
--- АВТО-ФЛИНГ (постоянно, даже после респавна)
--- ============================================
-
-local Target = nil
-local IsFlinging = false
-local SafeMode = false
-
-local function findTarget()
-    for _, p in pairs(Players:GetPlayers()) do
-        if p ~= Player then return p end
-    end
-    return nil
-end
-
--- Сейф-мод: телепортация по карте
-local function toggleSafeMode()
-    SafeMode = not SafeMode
-    
-    if SafeMode then
-        Message("SAFE MODE", "ON - Random teleport", 3)
-        
-        task.spawn(function()
-            while SafeMode do
-                if Player.Character and Player.Character:FindFirstChild("HumanoidRootPart") then
-                    local hrp = Player.Character.HumanoidRootPart
-                    hrp.CFrame = CFrame.new(
-                        math.random(-2000, 2000),
-                        math.random(500, 1000),
-                        math.random(-2000, 2000)
-                    )
-                end
-                task.wait(0.05)
-            end
-        end)
-    else
-        Message("SAFE MODE", "OFF - Fling resumed", 2)
-    end
-end
-
--- Авто-флинг цикл
-task.spawn(function()
-    while true do
-        if not SafeMode then
-            Target = findTarget()
-            
-            if Target and Target.Character then
-                IsFlinging = true
-                AllBool = false
-                
-                -- Флинг с pcall чтобы не крашнулось
-                pcall(function()
-                    SkidFling(Target)
-                end)
-                
-                IsFlinging = false
-            end
-        end
-        
-        task.wait(0.1) -- Небольшая задержка между циклами
-    end
+createSetting("MaxBaseSize (не большие)", SETTINGS.MaxBaseSize, 5, 100, function(v)
+	SETTINGS.MaxBaseSize = v
 end)
 
--- Отслеживание респавна цели
-Players.PlayerRemoving:Connect(function(p)
-    if p == Target then
-        Target = nil
-        Message("Target left", "Waiting for new...", 2)
-    end
+createSetting("GroupRadius (группировка)", SETTINGS.GroupRadius, 5, 50, function(v)
+	SETTINGS.GroupRadius = v
 end)
 
--- Горячие клавиши
-UserInputService.InputBegan:Connect(function(input, gpe)
-    if gpe then return end
-    
-    -- P - сейф-мод
-    if input.KeyCode == Enum.KeyCode.P then
-        toggleSafeMode()
-    end
+createSetting("MinGroupSize", SETTINGS.MinGroupSize, 2, 10, function(v)
+	SETTINGS.MinGroupSize = math.floor(v)
 end)
 
--- Инициализация
-getgenv().FPDH = workspace.FallenPartsDestroyHeight
+-- Кнопки
+local buttonFrame = Instance.new("Frame")
+buttonFrame.Size = UDim2.new(1, -20, 0, 80)
+buttonFrame.Position = UDim2.new(0, 10, 1, -90)
+buttonFrame.BackgroundTransparency = 1
+buttonFrame.Parent = mainFrame
 
-Message("AUTO-FLING", "Original SkidFling | P = Safe Mode", 5)
-print("🔥 Auto-fling active. Target:", findTarget() and findTarget().Name or "None")
+local btnLayout = Instance.new("UIListLayout")
+btnLayout.FillDirection = Enum.FillDirection.Horizontal
+btnLayout.Padding = UDim.new(0, 10)
+btnLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+btnLayout.Parent = buttonFrame
+
+local function createButton(text, color, callback)
+	local btn = Instance.new("TextButton")
+	btn.Size = UDim2.new(0.5, -5, 1, 0)
+	btn.BackgroundColor3 = color
+	btn.Text = text
+	btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+	btn.TextSize = 16
+	btn.Font = Enum.Font.GothamBold
+	btn.Parent = buttonFrame
+	
+	local btnCorner = Instance.new("UICorner")
+	btnCorner.CornerRadius = UDim.new(0, 8)
+	btnCorner.Parent = btn
+	
+	btn.MouseButton1Click:Connect(callback)
+	
+	return btn
+end
+
+createButton("🔍 Сканировать", Color3.fromRGB(0, 150, 255), function()
+	scanAndHighlight()
+end)
+
+createButton("🗑️ Очистить", Color3.fromRGB(255, 80, 80), function()
+	clearHighlights()
+	print("🗑️ Подсветка очищена")
+end)
+
+-- Легенда
+local legend = Instance.new("TextLabel")
+legend.Size = UDim2.new(1, -20, 0, 50)
+legend.Position = UDim2.new(0, 10, 1, -10)
+legend.BackgroundTransparency = 1
+legend.Text = "🟦 Одиночный  |  🟧 Группа"
+legend.TextColor3 = Color3.fromRGB(180, 180, 180)
+legend.TextSize = 12
+legend.Font = Enum.Font.Gotham
+legend.Parent = mainFrame
+
+-- Кнопка сворачивания
+local minimizeBtn = Instance.new("TextButton")
+minimizeBtn.Size = UDim2.new(0, 30, 0, 30)
+minimizeBtn.Position = UDim2.new(1, -35, 0, 5)
+minimizeBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 70)
+minimizeBtn.Text = "−"
+minimizeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+minimizeBtn.TextSize = 20
+minimizeBtn.Font = Enum.Font.GothamBold
+minimizeBtn.Parent = mainFrame
+
+local minCorner = Instance.new("UICorner")
+minCorner.CornerRadius = UDim.new(0, 6)
+minCorner.Parent = minimizeBtn
+
+local minimized = false
+minimizeBtn.MouseButton1Click:Connect(function()
+	minimized = not minimized
+	scrollFrame.Visible = not minimized
+	buttonFrame.Visible = not minimized
+	legend.Visible = not minimized
+	
+	if minimized then
+		mainFrame.Size = UDim2.new(0, 320, 0, 40)
+		minimizeBtn.Text = "+"
+	else
+		mainFrame.Size = UDim2.new(0, 320, 0, 400)
+		minimizeBtn.Text = "−"
+	end
+end)
+
+-- ═══════════════════════════════════════════════════════════
+-- АВТО-СКАНИРОВАНИЕ
+-- ═══════════════════════════════════════════════════════════
+
+local lastScan = 0
+
+RunService.Heartbeat:Connect(function()
+	local now = tick()
+	if now - lastScan >= SETTINGS.ScanInterval then
+		-- Авто-сканирование отключено по умолчанию, 
+		-- используйте кнопку "Сканировать"
+		lastScan = now
+	end
+end)
+
+-- Первичное сканирование через 2 секунды
+task.delay(2, function()
+	print("🚀 Object Finder загружен!")
+	print("Нажмите 'Сканировать' для поиска объектов")
+end)
+
+-- ═══════════════════════════════════════════════════════════
+-- ГОРЯЧИЕ КЛАВИШИ
+-- ═══════════════════════════════════════════════════════════
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+	if gameProcessed then return end
+	
+	if input.KeyCode == Enum.KeyCode.F then
+		scanAndHighlight()
+	elseif input.KeyCode == Enum.KeyCode.G then
+		clearHighlights()
+	end
+end)
+
+print("✅ Object Finder Script загружен!")
+print("F - Сканировать | G - Очистить")
