@@ -1,608 +1,446 @@
--- Полный локальный скрипт (LocalScript)
--- Разместить в: StarterPlayerScripts или StarterGui
+-- LocalScript, поместить в StarterPlayerScripts
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
+local PathfindingService = game:GetService("PathfindingService")
+local TweenService = game:GetService("TweenService")
 
 local player = Players.LocalPlayer
-local camera = workspace.CurrentCamera
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoid = character:WaitForChild("Humanoid")
+local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
 
--- ═══════════════════════════════════════════════════════════
--- НАСТРОЙКИ ПОИСКА ОБЪЕКТОВ
--- ═══════════════════════════════════════════════════════════
+-- Настройки
+local HIGHLIGHT_COLOR_BENCH = Color3.fromRGB(0, 255, 0)
+local HIGHLIGHT_COLOR_TRASH = Color3.fromRGB(255, 0, 0)
+local MAX_DISTANCE = 500
+local WALK_SPEED = 32
+local PROXIMITY_DISTANCE = 3.5 -- Дистанция "в притык"
+local FLY_UP_HEIGHT = 50
+local FLY_SIDE_DISTANCE = 14
 
-local SETTINGS = {
-	-- Главное: НЕ высокие (не земля)
-	MaxHeight = 5,           -- Максимальная высота объекта (Y)
-	MinHeight = 0.1,         -- Минимальная высота (чтобы не было слишком плоских)
-	
-	-- НЕ большие (по объёму/площади)
-	MaxBaseSize = 30,        -- Максимальная площадь основания (X * Z)
-	MaxVolume = 100,         -- Максимальный объём
-	
-	-- МОГУТ быть длинные (в любую сторону)
-	MaxLengthRatio = 10,     -- Максимальное отношение длины к ширине/высоте
-	
-	-- Группировка рядом стоящих
-	GroupRadius = 15,        -- Радиус для группировки объектов
-	MinGroupSize = 2,        -- Минимум объектов для подсветки группы
-	
-	-- Визуал
-	HighlightColor = Color3.fromRGB(0, 255, 255),    -- Цвет подсветки
-	GroupHighlightColor = Color3.fromRGB(255, 165, 0), -- Цвет группы
-	OutlineColor = Color3.fromRGB(255, 255, 255),
-	Transparency = 0.5,
-	
-	-- Производительность
-	ScanInterval = 2,        -- Секунды между сканированиями
-	MaxObjects = 500,        -- Максимум объектов для проверки
-}
+-- Анимации
+local ANIM_ID_1 = "rbxassetid://180436334"
+local ANIM_ID_2 = "rbxassetid://10480793962"
 
--- ═══════════════════════════════════════════════════════════
--- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
--- ═══════════════════════════════════════════════════════════
+-- Состояния
+local highlights = {}
+local currentPath = nil
+local isRunning = false
+local isAnimating = false
 
-local function getModelSize(model)
-	-- Получаем размеры модели через BoundingBox
-	local success, result = pcall(function()
-		return model:GetBoundingBox()
-	end)
-	
-	if success and result then
-		local cf, size = result[1], result[2]
-		return size
-	end
-	
-	-- Fallback: считаем через детей
-	local minPos = Vector3.new(math.huge, math.huge, math.huge)
-	local maxPos = Vector3.new(-math.huge, -math.huge, -math.huge)
-	local hasParts = false
-	
-	for _, child in ipairs(model:GetDescendants()) do
-		if child:IsA("BasePart") then
-			hasParts = true
-			local pos = child.Position
-			local halfSize = child.Size / 2
-			
-			minPos = Vector3.new(
-				math.min(minPos.X, pos.X - halfSize.X),
-				math.min(minPos.Y, pos.Y - halfSize.Y),
-				math.min(minPos.Z, pos.Z - halfSize.Z)
-			)
-			maxPos = Vector3.new(
-				math.max(maxPos.X, pos.X + halfSize.X),
-				math.max(maxPos.Y, pos.Y + halfSize.Y),
-				math.max(maxPos.Z, pos.Z + halfSize.Z)
-			)
-		end
-	end
-	
-	if hasParts then
-		return maxPos - minPos
-	end
-	
-	return nil
+-- Установка скорости
+humanoid.WalkSpeed = WALK_SPEED
+
+-- Проверка видимости
+local function isVisible(obj)
+    local part = getPart(obj)
+    if not part then return false end
+    return part.Transparency < 1 and part.Parent ~= nil
 end
 
-local function getModelCenter(model)
-	local success, result = pcall(function()
-		return model:GetBoundingBox()
-	end)
-	
-	if success and result then
-		return result[1].Position
-	end
-	
-	-- Fallback
-	local totalPos = Vector3.zero
-	local count = 0
-	
-	for _, child in ipairs(model:GetDescendants()) do
-		if child:IsA("BasePart") then
-			totalPos += child.Position
-			count += 1
-		end
-	end
-	
-	if count > 0 then
-		return totalPos / count
-	end
-	
-	return nil
+-- Получение части
+function getPart(obj)
+    if obj:IsA("BasePart") then
+        return obj
+    elseif obj:IsA("Model") then
+        return obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart")
+    end
+    return nil
 end
 
-local function isGroundLike(size, position)
-	-- Проверяем, похож ли объект на землю/пол
-	if not size or not position then return true end
-	
-	local baseArea = size.X * size.Z
-	local volume = baseArea * size.Y
-	
-	-- Земля обычно: очень широкая, очень низкая, огромная площадь
-	if size.Y < 2 and baseArea > 100 then
-		return true
-	end
-	
-	-- Очень большой объём = скорее всего земля/террейн
-	if volume > 1000 then
-		return true
-	end
-	
-	return false
+-- Получение позиции
+local function getPosition(obj)
+    local part = getPart(obj)
+    return part and part.Position or nil
 end
 
-local function matchesCriteria(model)
-	-- Проверяем, подходит ли объект под критерии
-	
-	local size = getModelSize(model)
-	local center = getModelCenter(model)
-	
-	if not size or not center then return false end
-	
-	-- 1. НЕ высокие (главное)
-	if size.Y > SETTINGS.MaxHeight then
-		return false
-	end
-	if size.Y < SETTINGS.MinHeight then
-		return false
-	end
-	
-	-- 2. НЕ похожи на землю
-	if isGroundLike(size, center) then
-		return false
-	end
-	
-	-- 3. НЕ большие (по площади основания)
-	local baseArea = size.X * size.Z
-	if baseArea > SETTINGS.MaxBaseSize then
-		return false
-	end
-	
-	-- 4. НЕ большие по объёму
-	local volume = baseArea * size.Y
-	if volume > SETTINGS.MaxVolume then
-		return false
-	end
-	
-	-- 5. МОГУТ быть длинные (проверяем соотношение сторон)
-	local maxDim = math.max(size.X, size.Y, size.Z)
-	local minDim = math.min(size.X, size.Y, size.Z)
-	
-	if minDim > 0 then
-		local ratio = maxDim / minDim
-		if ratio > SETTINGS.MaxLengthRatio then
-			-- Слишком вытянутый - пропускаем
-			return false
-		end
-	end
-	
-	return true, size, center
+-- Создание подсветки
+local function createHighlight(obj, color)
+    local part = getPart(obj)
+    if not part or highlights[part] or not isVisible(obj) then return end
+    
+    local highlight = Instance.new("Highlight")
+    highlight.Adornee = part
+    highlight.FillColor = color
+    highlight.OutlineColor = color
+    highlight.FillTransparency = 0.5
+    highlight.OutlineTransparency = 0
+    highlight.Parent = part
+    highlights[part] = highlight
 end
 
--- ═══════════════════════════════════════════════════════════
--- СИСТЕМА ПОДСВЕТКИ
--- ═══════════════════════════════════════════════════════════
-
-local HighlightsFolder = Instance.new("Folder")
-HighlightsFolder.Name = "ObjectHighlights"
-HighlightsFolder.Parent = workspace
-
-local activeHighlights = {}
-
-local function clearHighlights()
-	for _, highlight in ipairs(activeHighlights) do
-		if highlight then
-			highlight:Destroy()
-		end
-	end
-	activeHighlights = {}
+-- Подсветка всех объектов
+local function setupHighlights()
+    for part, hl in pairs(highlights) do
+        hl:Destroy()
+    end
+    highlights = {}
+    
+    local benchsFolder = workspace:FindFirstChild("Map") and workspace.Map:FindFirstChild("Benchs")
+    local trashFolder = workspace:FindFirstChild("Map") and workspace.Map:FindFirstChild("Trash")
+    
+    if benchsFolder then
+        for _, obj in ipairs(benchsFolder:GetDescendants()) do
+            if (obj:IsA("BasePart") or obj:IsA("Model")) and isVisible(obj) then
+                createHighlight(obj, HIGHLIGHT_COLOR_BENCH)
+            end
+        end
+    end
+    
+    if trashFolder then
+        for _, obj in ipairs(trashFolder:GetDescendants()) do
+            if (obj:IsA("BasePart") or obj:IsA("Model")) and isVisible(obj) then
+                createHighlight(obj, HIGHLIGHT_COLOR_TRASH)
+            end
+        end
+    end
 end
 
-local function createHighlight(model, color)
-	if not model or not model.Parent then return end
-	
-	-- Проверяем, нет ли уже подсветки
-	for _, existing in ipairs(activeHighlights) do
-		if existing.Adornee == model then
-			return
-		end
-	end
-	
-	local highlight = Instance.new("Highlight")
-	highlight.Name = "FinderHighlight"
-	highlight.Adornee = model
-	highlight.FillColor = color or SETTINGS.HighlightColor
-	highlight.OutlineColor = SETTINGS.OutlineColor
-	highlight.FillTransparency = SETTINGS.Transparency
-	highlight.OutlineTransparency = 0
-	highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-	highlight.Parent = HighlightsFolder
-	
-	table.insert(activeHighlights, highlight)
-	return highlight
+-- Поиск ближайшего видимого объекта
+local function findNearestObject()
+    local nearest = nil
+    local nearestDist = math.huge
+    
+    local benchsFolder = workspace:FindFirstChild("Map") and workspace.Map:FindFirstChild("Benchs")
+    local trashFolder = workspace:FindFirstChild("Map") and workspace.Map:FindFirstChild("Trash")
+    
+    local function checkFolder(folder)
+        if not folder then return end
+        for _, obj in ipairs(folder:GetDescendants()) do
+            if (obj:IsA("BasePart") or obj:IsA("Model")) and isVisible(obj) then
+                local pos = getPosition(obj)
+                if pos then
+                    local dist = (humanoidRootPart.Position - pos).Magnitude
+                    if dist < nearestDist and dist <= MAX_DISTANCE then
+                        nearestDist = dist
+                        nearest = obj
+                    end
+                end
+            end
+        end
+    end
+    
+    checkFolder(benchsFolder)
+    checkFolder(trashFolder)
+    
+    return nearest
 end
 
--- ═══════════════════════════════════════════════════════════
--- ПОИСК И ГРУППИРОВКА
--- ═══════════════════════════════════════════════════════════
-
-local function findValidObjects()
-	local validObjects = {}
-	local checked = 0
-	
-	-- Сканируем workspace
-	for _, obj in ipairs(workspace:GetDescendants()) do
-		if checked >= SETTINGS.MaxObjects then break end
-		
-		-- Проверяем только Model и Parts
-		if obj:IsA("Model") or obj:IsA("BasePart") then
-			-- Пропускаем персонажей игроков
-			if obj:IsA("Model") and obj:FindFirstChildOfClass("Humanoid") then
-				continue
-			end
-			
-			-- Пропускаем части персонажей
-			if obj:IsA("BasePart") then
-				local char = obj:FindFirstAncestorOfClass("Model")
-				if char and char:FindFirstChildOfClass("Humanoid") then
-					continue
-				end
-			end
-			
-			local target = obj
-			if obj:IsA("BasePart") then
-				-- Для частей берём родительскую модель если есть
-				target = obj:FindFirstAncestorOfClass("Model") or obj
-			end
-			
-			-- Проверяем критерии
-			local matches, size, center = matchesCriteria(target)
-			if matches then
-				-- Проверяем, не добавили ли уже
-				local alreadyAdded = false
-				for _, existing in ipairs(validObjects) do
-					if existing.Object == target then
-						alreadyAdded = true
-						break
-					end
-				end
-				
-				if not alreadyAdded then
-					table.insert(validObjects, {
-						Object = target,
-						Size = size,
-						Center = center
-					})
-				end
-			end
-			
-			checked += 1
-		end
-	end
-	
-	return validObjects
+-- Остановка движения
+local function stopMoving()
+    isRunning = false
+    currentPath = nil
+    humanoid:MoveTo(humanoidRootPart.Position)
 end
 
-local function groupNearbyObjects(objects)
-	-- Группируем объекты по близости
-	local groups = {}
-	local assigned = {}
-	
-	for i, objData in ipairs(objects) do
-		if assigned[i] then continue end
-		
-		local group = {objData}
-		assigned[i] = true
-		
-		for j, otherData in ipairs(objects) do
-			if i == j or assigned[j] then continue end
-			
-			local distance = (objData.Center - otherData.Center).Magnitude
-			if distance <= SETTINGS.GroupRadius then
-				table.insert(group, otherData)
-				assigned[j] = true
-			end
-		end
-		
-		table.insert(groups, group)
-	end
-	
-	return groups
+-- Основная анимационная последовательность "в притык"
+local function playProximitySequence(targetObj)
+    if isAnimating then return end
+    isAnimating = true
+    isRunning = false
+    
+    local targetPart = getPart(targetObj)
+    if not targetPart then 
+        isAnimating = false
+        return 
+    end
+    
+    -- Отключаем физику персонажа на время анимации
+    humanoid.PlatformStand = true
+    
+    -- 1. ПРИЖИМАЕМСЯ К ПАРТУ (0.2 сек)
+    local targetCFrame = targetPart.CFrame * CFrame.new(0, 0, -2) -- Спереди на 2 студа
+    local tween1 = TweenService:Create(
+        humanoidRootPart,
+        TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+        {CFrame = targetCFrame}
+    )
+    tween1:Play()
+    tween1.Completed:Wait()
+    
+    -- 2. ЗАКРЕПЛЯЕМСЯ (0.1 сек подъём на 2 студа)
+    local attachCFrame = humanoidRootPart.CFrame * CFrame.new(0, 2, 0)
+    local tween2 = TweenService:Create(
+        humanoidRootPart,
+        TweenInfo.new(0.1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+        {CFrame = attachCFrame}
+    )
+    tween2:Play()
+    tween2.Completed:Wait()
+    
+    -- 3. ПРОИГРЫВАЕМ АНИМАЦИЮ 180436334 (0.3 сек)
+    local anim1 = Instance.new("Animation")
+    anim1.AnimationId = ANIM_ID_1
+    local track1 = humanoid:LoadAnimation(anim1)
+    track1:Play()
+    track1:AdjustSpeed(3.33) -- 0.3 сек = 3.33x скорость (стандарт 1 сек)
+    
+    task.wait(0.3)
+    track1:AdjustSpeed(0) -- Останавливаем, поза застывает
+    
+    -- 4. ЖДЁМ 0.5 сек
+    task.wait(0.5)
+    
+    -- 5. АКТИВИРУЕМ REMOTEEVENT
+    local communicate = character:FindFirstChild("Communicate")
+    if communicate and communicate:IsA("RemoteEvent") then
+        communicate:FireServer()
+    end
+    
+    -- 6. НАЧИНАЕМ ПОДЛЁТ (0.1 сек задержка + подлёт 0.3 сек)
+    -- Сначала включаем PlatformStand для физики полёта
+    humanoid.PlatformStand = true
+    
+    -- Создаём BodyVelocity для контроля полёта
+    local bodyVel = Instance.new("BodyVelocity")
+    bodyVel.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+    bodyVel.Velocity = Vector3.zero
+    bodyVel.Parent = humanoidRootPart
+    
+    local bodyGyro = Instance.new("BodyGyro")
+    bodyGyro.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
+    bodyGyro.CFrame = humanoidRootPart.CFrame
+    bodyGyro.Parent = humanoidRootPart
+    
+    -- Подлёт вверх на 50 стадов + вбок на 14 стадов
+    local flyGoal = humanoidRootPart.CFrame * CFrame.new(FLY_SIDE_DISTANCE, FLY_UP_HEIGHT, 0)
+    
+    task.wait(0.1) -- Задержка 0.1 перед подлётом
+    
+    local tween3 = TweenService:Create(
+        humanoidRootPart,
+        TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+        {CFrame = flyGoal}
+    )
+    tween3:Play()
+    
+    -- 7. ВО ВРЕМЯ ПОДЛЁТА — АНИМАЦИЯ 10480793962
+    local anim2 = Instance.new("Animation")
+    anim2.AnimationId = ANIM_ID_2
+    local track2 = humanoid:LoadAnimation(anim2)
+    track2:Play()
+    
+    tween3.Completed:Wait()
+    
+    -- Чистим
+    bodyVel:Destroy()
+    bodyGyro:Destroy()
+    humanoid.PlatformStand = false
+    isAnimating = false
 end
 
--- ═══════════════════════════════════════════════════════════
--- ОСНОВНОЙ СКАНЕР
--- ═══════════════════════════════════════════════════════════
-
-local function scanAndHighlight()
-	clearHighlights()
-	
-	print("🔍 Сканирование объектов...")
-	local validObjects = findValidObjects()
-	print("✅ Найдено подходящих объектов: " .. #validObjects)
-	
-	if #validObjects == 0 then
-		print("❌ Нет объектов, соответствующих критериям")
-		return
-	end
-	
-	local groups = groupNearbyObjects(validObjects)
-	print("📦 Сформировано групп: " .. #groups)
-	
-	for _, group in ipairs(groups) do
-		local isGroup = #group >= SETTINGS.MinGroupSize
-		
-		for _, objData in ipairs(group) do
-			local color = isGroup and SETTINGS.GroupHighlightColor or SETTINGS.HighlightColor
-			createHighlight(objData.Object, color)
-			
-			if isGroup then
-				print(string.format("  📍 ГРУППА [%d объектов]: %s", #group, objData.Object:GetFullName()))
-			else
-				print(string.format("  📍 Одиночный: %s", objData.Object:GetFullName()))
-			end
-		end
-	end
-	
-	print(string.format("🎨 Подсвечено объектов: %d", #activeHighlights))
+-- Движение к объекту
+local function moveToObject(targetObj)
+    if not targetObj or isRunning or isAnimating then return end
+    
+    if not isVisible(targetObj) then
+        isRunning = false
+        return
+    end
+    
+    isRunning = true
+    
+    local path = PathfindingService:CreatePath({
+        AgentRadius = 2,
+        AgentHeight = 5,
+        AgentCanJump = true,
+        AgentJumpHeight = 7,
+        AgentMaxSlope = 45
+    })
+    
+    currentPath = path
+    
+    local targetPos = getPosition(targetObj)
+    if not targetPos then 
+        isRunning = false 
+        return 
+    end
+    
+    local success = pcall(function()
+        path:ComputeAsync(humanoidRootPart.Position, targetPos)
+    end)
+    
+    if success and path.Status == Enum.PathStatus.Success then
+        local waypoints = path:GetWaypoints()
+        
+        for i, waypoint in ipairs(waypoints) do
+            if not isRunning or isAnimating then break end
+            
+            if not isVisible(targetObj) then
+                stopMoving()
+                return
+            end
+            
+            -- Проверяем дистанцию до цели
+            local currentDist = (humanoidRootPart.Position - targetPos).Magnitude
+            if currentDist <= PROXIMITY_DISTANCE then
+                stopMoving()
+                playProximitySequence(targetObj)
+                return
+            end
+            
+            humanoid:MoveTo(waypoint.Position)
+            
+            local reached = false
+            local connection
+            connection = humanoid.MoveToFinished:Connect(function()
+                reached = true
+                if connection then connection:Disconnect() end
+            end)
+            
+            local startTime = tick()
+            while not reached and isRunning and not isAnimating do
+                -- Проверяем дистанцию во время движения
+                local dist = (humanoidRootPart.Position - targetPos).Magnitude
+                if dist <= PROXIMITY_DISTANCE then
+                    if connection then connection:Disconnect() end
+                    stopMoving()
+                    playProximitySequence(targetObj)
+                    return
+                end
+                
+                if tick() - startTime > 5 then
+                    break
+                end
+                task.wait(0.05)
+            end
+            
+            if connection then connection:Disconnect() end
+            
+            if waypoint.Action == Enum.PathWaypointAction.Jump then
+                humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+            end
+        end
+        
+        -- После всех waypoints проверяем ещё раз дистанцию
+        local finalDist = (humanoidRootPart.Position - targetPos).Magnitude
+        if finalDist <= PROXIMITY_DISTANCE then
+            stopMoving()
+            playProximitySequence(targetObj)
+            return
+        end
+        
+    else
+        humanoid:MoveTo(targetPos)
+        -- Ждём приближения
+        while isRunning and not isAnimating do
+            local dist = (humanoidRootPart.Position - targetPos).Magnitude
+            if dist <= PROXIMITY_DISTANCE then
+                stopMoving()
+                playProximitySequence(targetObj)
+                return
+            end
+            if not isVisible(targetObj) then
+                stopMoving()
+                return
+            end
+            task.wait(0.05)
+        end
+    end
+    
+    isRunning = false
+    currentPath = nil
 end
 
--- ═══════════════════════════════════════════════════════════
--- UI ИНТЕРФЕЙС
--- ═══════════════════════════════════════════════════════════
-
-local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "ObjectFinderUI"
-screenGui.ResetOnSpawn = false
-screenGui.Parent = player:WaitForChild("PlayerGui")
-
--- Основная панель
-local mainFrame = Instance.new("Frame")
-mainFrame.Name = "MainPanel"
-mainFrame.Size = UDim2.new(0, 320, 0, 400)
-mainFrame.Position = UDim2.new(0, 20, 0.5, -200)
-mainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
-mainFrame.BorderSizePixel = 0
-mainFrame.Parent = screenGui
-
-local corner = Instance.new("UICorner")
-corner.CornerRadius = UDim.new(0, 12)
-corner.Parent = mainFrame
-
--- Заголовок
-local title = Instance.new("TextLabel")
-title.Name = "Title"
-title.Size = UDim2.new(1, 0, 0, 40)
-title.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
-title.Text = "🔍 Object Finder"
-title.TextColor3 = Color3.fromRGB(255, 255, 255)
-title.TextSize = 18
-title.Font = Enum.Font.GothamBold
-title.Parent = mainFrame
-
-local titleCorner = Instance.new("UICorner")
-titleCorner.CornerRadius = UDim.new(0, 12)
-titleCorner.Parent = title
-
--- Скроллируемая область для настроек
-local scrollFrame = Instance.new("ScrollingFrame")
-scrollFrame.Name = "Settings"
-scrollFrame.Size = UDim2.new(1, -20, 1, -140)
-scrollFrame.Position = UDim2.new(0, 10, 0, 50)
-scrollFrame.BackgroundTransparency = 1
-scrollFrame.ScrollBarThickness = 4
-scrollFrame.CanvasSize = UDim2.new(0, 0, 0, 500)
-scrollFrame.Parent = mainFrame
-
-local layout = Instance.new("UIListLayout")
-layout.Padding = UDim.new(0, 8)
-layout.Parent = scrollFrame
-
--- Функция создания слайдера настройки
-local function createSetting(name, defaultValue, min, max, callback)
-	local frame = Instance.new("Frame")
-	frame.Size = UDim2.new(1, -10, 0, 60)
-	frame.BackgroundTransparency = 1
-	frame.Parent = scrollFrame
-	
-	local label = Instance.new("TextLabel")
-	label.Size = UDim2.new(1, 0, 0, 20)
-	label.BackgroundTransparency = 1
-	label.Text = name .. ": " .. tostring(defaultValue)
-	label.TextColor3 = Color3.fromRGB(200, 200, 200)
-	label.TextSize = 14
-	label.Font = Enum.Font.Gotham
-	label.TextXAlignment = Enum.TextXAlignment.Left
-	label.Parent = frame
-	
-	local sliderBg = Instance.new("Frame")
-	sliderBg.Size = UDim2.new(1, 0, 0, 8)
-	sliderBg.Position = UDim2.new(0, 0, 0, 30)
-	sliderBg.BackgroundColor3 = Color3.fromRGB(60, 60, 70)
-	sliderBg.BorderSizePixel = 0
-	sliderBg.Parent = frame
-	
-	local sliderCorner = Instance.new("UICorner")
-	sliderCorner.CornerRadius = UDim.new(1, 0)
-	sliderCorner.Parent = sliderBg
-	
-	local sliderFill = Instance.new("Frame")
-	sliderFill.Size = UDim2.new((defaultValue - min) / (max - min), 0, 1, 0)
-	sliderFill.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
-	sliderFill.BorderSizePixel = 0
-	sliderFill.Parent = sliderBg
-	
-	local fillCorner = Instance.new("UICorner")
-	fillCorner.CornerRadius = UDim.new(1, 0)
-	fillCorner.Parent = sliderFill
-	
-	local dragging = false
-	
-	sliderBg.InputBegan:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1 or 
-		   input.UserInputType == Enum.UserInputType.Touch then
-			dragging = true
-		end
-	end)
-	
-	UserInputService.InputChanged:Connect(function(input)
-		if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or 
-						 input.UserInputType == Enum.UserInputType.Touch) then
-			local pos = math.clamp((input.Position.X - sliderBg.AbsolutePosition.X) / sliderBg.AbsoluteSize.X, 0, 1)
-			local value = min + (max - min) * pos
-			value = math.floor(value * 10) / 10
-			
-			sliderFill.Size = UDim2.new(pos, 0, 1, 0)
-			label.Text = name .. ": " .. tostring(value)
-			callback(value)
-		end
-	end)
-	
-	UserInputService.InputEnded:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1 or 
-		   input.UserInputType == Enum.UserInputType.Touch then
-			dragging = false
-		end
-	end)
-	
-	return frame
+-- Создание GUI кнопки
+local function createButton()
+    local screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "AutoMoveGui"
+    screenGui.ResetOnSpawn = false
+    screenGui.Parent = player:WaitForChild("PlayerGui")
+    
+    local button = Instance.new("TextButton")
+    button.Name = "MoveButton"
+    button.Size = UDim2.new(0, 120, 0, 50)
+    button.Position = UDim2.new(0.5, -60, 0.9, -25)
+    button.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
+    button.TextColor3 = Color3.fromRGB(255, 255, 255)
+    button.Text = "Бежать"
+    button.TextSize = 20
+    button.Font = Enum.Font.SourceSansBold
+    button.BorderSizePixel = 2
+    button.BorderColor3 = Color3.fromRGB(0, 0, 0)
+    button.Parent = screenGui
+    
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 8)
+    corner.Parent = button
+    
+    button.MouseButton1Click:Connect(function()
+        if isAnimating then return end
+        
+        if isRunning then
+            stopMoving()
+            button.Text = "Бежать"
+            button.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
+        else
+            local nearest = findNearestObject()
+            if nearest then
+                button.Text = "Стоп"
+                button.BackgroundColor3 = Color3.fromRGB(255, 80, 80)
+                moveToObject(nearest)
+            else
+                button.Text = "Нет цели"
+                task.wait(1)
+                button.Text = "Бежать"
+            end
+        end
+    end)
+    
+    RunService.Heartbeat:Connect(function()
+        if not isRunning and not isAnimating and button.Text == "Стоп" then
+            button.Text = "Бежать"
+            button.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
+        end
+    end)
+    
+    return button
 end
 
--- Создаём настройки
-createSetting("MaxHeight (не высокие)", SETTINGS.MaxHeight, 0.5, 20, function(v)
-	SETTINGS.MaxHeight = v
+-- Респавн
+player.CharacterAdded:Connect(function(newChar)
+    character = newChar
+    humanoid = newChar:WaitForChild("Humanoid")
+    humanoidRootPart = newChar:WaitForChild("HumanoidRootPart")
+    humanoid.WalkSpeed = WALK_SPEED
+    isRunning = false
+    isAnimating = false
+    setupHighlights()
 end)
 
-createSetting("MaxBaseSize (не большие)", SETTINGS.MaxBaseSize, 5, 100, function(v)
-	SETTINGS.MaxBaseSize = v
-end)
+-- Инициализация
+setupHighlights()
 
-createSetting("GroupRadius (группировка)", SETTINGS.GroupRadius, 5, 50, function(v)
-	SETTINGS.GroupRadius = v
-end)
-
-createSetting("MinGroupSize", SETTINGS.MinGroupSize, 2, 10, function(v)
-	SETTINGS.MinGroupSize = math.floor(v)
-end)
-
--- Кнопки
-local buttonFrame = Instance.new("Frame")
-buttonFrame.Size = UDim2.new(1, -20, 0, 80)
-buttonFrame.Position = UDim2.new(0, 10, 1, -90)
-buttonFrame.BackgroundTransparency = 1
-buttonFrame.Parent = mainFrame
-
-local btnLayout = Instance.new("UIListLayout")
-btnLayout.FillDirection = Enum.FillDirection.Horizontal
-btnLayout.Padding = UDim.new(0, 10)
-btnLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-btnLayout.Parent = buttonFrame
-
-local function createButton(text, color, callback)
-	local btn = Instance.new("TextButton")
-	btn.Size = UDim2.new(0.5, -5, 1, 0)
-	btn.BackgroundColor3 = color
-	btn.Text = text
-	btn.TextColor3 = Color3.fromRGB(255, 255, 255)
-	btn.TextSize = 16
-	btn.Font = Enum.Font.GothamBold
-	btn.Parent = buttonFrame
-	
-	local btnCorner = Instance.new("UICorner")
-	btnCorner.CornerRadius = UDim.new(0, 8)
-	btnCorner.Parent = btn
-	
-	btn.MouseButton1Click:Connect(callback)
-	
-	return btn
+-- Обновление подсветки
+local mapFolder = workspace:FindFirstChild("Map")
+if mapFolder then
+    local benchsFolder = mapFolder:FindFirstChild("Benchs")
+    local trashFolder = mapFolder:FindFirstChild("Trash")
+    
+    if benchsFolder then
+        benchsFolder.DescendantAdded:Connect(function()
+            task.wait(0.1)
+            setupHighlights()
+        end)
+        benchsFolder.DescendantRemoving:Connect(function()
+            task.wait(0.1)
+            setupHighlights()
+        end)
+    end
+    
+    if trashFolder then
+        trashFolder.DescendantAdded:Connect(function()
+            task.wait(0.1)
+            setupHighlights()
+        end)
+        trashFolder.DescendantRemoving:Connect(function()
+            task.wait(0.1)
+            setupHighlights()
+        end)
+    end
 end
 
-createButton("🔍 Сканировать", Color3.fromRGB(0, 150, 255), function()
-	scanAndHighlight()
-end)
+createButton()
 
-createButton("🗑️ Очистить", Color3.fromRGB(255, 80, 80), function()
-	clearHighlights()
-	print("🗑️ Подсветка очищена")
-end)
-
--- Легенда
-local legend = Instance.new("TextLabel")
-legend.Size = UDim2.new(1, -20, 0, 50)
-legend.Position = UDim2.new(0, 10, 1, -10)
-legend.BackgroundTransparency = 1
-legend.Text = "🟦 Одиночный  |  🟧 Группа"
-legend.TextColor3 = Color3.fromRGB(180, 180, 180)
-legend.TextSize = 12
-legend.Font = Enum.Font.Gotham
-legend.Parent = mainFrame
-
--- Кнопка сворачивания
-local minimizeBtn = Instance.new("TextButton")
-minimizeBtn.Size = UDim2.new(0, 30, 0, 30)
-minimizeBtn.Position = UDim2.new(1, -35, 0, 5)
-minimizeBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 70)
-minimizeBtn.Text = "−"
-minimizeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-minimizeBtn.TextSize = 20
-minimizeBtn.Font = Enum.Font.GothamBold
-minimizeBtn.Parent = mainFrame
-
-local minCorner = Instance.new("UICorner")
-minCorner.CornerRadius = UDim.new(0, 6)
-minCorner.Parent = minimizeBtn
-
-local minimized = false
-minimizeBtn.MouseButton1Click:Connect(function()
-	minimized = not minimized
-	scrollFrame.Visible = not minimized
-	buttonFrame.Visible = not minimized
-	legend.Visible = not minimized
-	
-	if minimized then
-		mainFrame.Size = UDim2.new(0, 320, 0, 40)
-		minimizeBtn.Text = "+"
-	else
-		mainFrame.Size = UDim2.new(0, 320, 0, 400)
-		minimizeBtn.Text = "−"
-	end
-end)
-
--- ═══════════════════════════════════════════════════════════
--- АВТО-СКАНИРОВАНИЕ
--- ═══════════════════════════════════════════════════════════
-
-local lastScan = 0
-
-RunService.Heartbeat:Connect(function()
-	local now = tick()
-	if now - lastScan >= SETTINGS.ScanInterval then
-		-- Авто-сканирование отключено по умолчанию, 
-		-- используйте кнопку "Сканировать"
-		lastScan = now
-	end
-end)
-
--- Первичное сканирование через 2 секунды
-task.delay(2, function()
-	print("🚀 Object Finder загружен!")
-	print("Нажмите 'Сканировать' для поиска объектов")
-end)
-
--- ═══════════════════════════════════════════════════════════
--- ГОРЯЧИЕ КЛАВИШИ
--- ═══════════════════════════════════════════════════════════
-
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-	if gameProcessed then return end
-	
-	if input.KeyCode == Enum.KeyCode.F then
-		scanAndHighlight()
-	elseif input.KeyCode == Enum.KeyCode.G then
-		clearHighlights()
-	end
-end)
-
-print("✅ Object Finder Script загружен!")
-print("F - Сканировать | G - Очистить")
+print("Скрипт загружен! Скорость:", WALK_SPEED, "Притык:", PROXIMITY_DISTANCE)
